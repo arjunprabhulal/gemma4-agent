@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/arjunprabhulal/gemma4-agent/main/assets/logo.jpg" alt="gemma4-agent logo" width="220" style="border-radius: 20px;">
-</p>
-
 <h1 align="center">⚡ gemma4-agent</h1>
 
 <p align="center">
