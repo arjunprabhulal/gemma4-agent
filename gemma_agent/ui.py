@@ -70,8 +70,8 @@ def print_banner(backend_name: str, model_name: str):
     info_table.add_column(style="bold yellow", justify="right")
     info_table.add_column(style="bold white", justify="left")
     info_table.add_row("Backend:", f"[bold cyan]{backend_name}[/bold cyan]")
-    info_table.add_row("Model:", f"[bold green]{model_name}[/bold green]")
-    info_table.add_row("Commands:", "[dim]/voice, /stop, /model, /tools, /skills, /clear, /help, /exit[/dim]")
+    info_table.add_row("Model:", f"[bold green]{escape(model_name)}[/bold green]")
+    info_table.add_row("Commands:", "[dim]/voice, /stop, /model, /tools, /skills, /mcp, /history, /clear, /help, /exit[/dim]")
 
     panel_content = Table.grid(expand=True)
     panel_content.add_column()
@@ -106,8 +106,12 @@ def print_agent_thought(thought: str):
 
 
 def print_thinking_panel(thinking_text: str):
+    # rich's Markdown silently drops raw-HTML blocks, so think-text containing
+    # pseudo-XML tags (<plan>, <script>...) would render an empty panel.
+    stripped = thinking_text.strip()
+    body = Markdown(stripped) if "<" not in stripped else Text(stripped, style="italic cyan")
     console.print(Panel(
-        Markdown(thinking_text.strip()),
+        body,
         title="[bold cyan]🧠 Deep Reasoning & Planning (Gemma 4 Think)[/bold cyan]",
         title_align="left",
         box=box.ROUNDED,
@@ -166,7 +170,7 @@ def print_tool_result(result: str, is_error: bool = False):
     ))
 
 
-def print_markdown(content: str, title: Optional[str] = None):
+def print_markdown(content: str, title: Optional[str] = None, speak: bool = True):
     md = Markdown(content.strip())
     panel_title = f"[bold cyan]✨ 💎 Google Gemma 4[/bold cyan] [bold magenta]{title or 'Agent'}[/bold magenta]"
     console.print(Panel(
@@ -177,8 +181,9 @@ def print_markdown(content: str, title: Optional[str] = None):
         border_style="bold magenta",
         padding=(1, 2)
     ))
-    
-    speak_text(content)
+
+    if speak:
+        speak_text(content)
 
 
 def print_info(msg: str):
@@ -211,7 +216,7 @@ def print_turn_metrics(
     metrics_table.add_row(
         f"⏱️  Time: [bold green]{duration_sec:.2f}s[/bold green]",
         token_info,
-        f"⚙️ Backend: [bold blue]{backend_label}[/bold blue]"
+        f"⚙️ Backend: [bold blue]{escape(backend_label)}[/bold blue]"
     )
     
     console.print(Panel(
@@ -232,10 +237,10 @@ def print_help():
     table.add_row("/clear", "Clear session conversation history")
     table.add_row("/tools", "List all active agent tools")
     table.add_row("/skills", "List all active Google Cloud Skills (google/skills)")
-    table.add_row("/mcp", "Register and list MCP server configs (experimental)")
+    table.add_row("/mcp", "Register/list/remove MCP server configs (experimental)")
     table.add_row("/history", "Display conversation transcript")
-    table.add_row("/voice", "Toggle 2-Way Voice Mode (Mic Input + Speaker Output)")
-    table.add_row("/stop", "Stop/Disable Voice Assistant mode and return to typing")
+    table.add_row(escape("/voice [seconds]"), "Toggle 2-Way Voice Mode; optional speech-wait window (aliases: /mic, /talk)")
+    table.add_row("/stop", "Disable Voice Assistant mode and return to typing (alias: /pause)")
     table.add_row("/model <tag>", "Switch active local Gemma model tag on the fly (alias: /backend)")
     table.add_row("/exit or /quit", "Exit the agent CLI")
     console.print(table)

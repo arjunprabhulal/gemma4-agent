@@ -8,6 +8,7 @@ and telemetry tracking for the Google Gemma 4 CLI Agent.
 import re
 import json
 from typing import List, Dict, Any, Optional, Tuple
+from rich.markup import escape
 from gemma_agent.backends import BaseBackend
 from gemma_agent.tools import ToolRegistry
 from gemma_agent.skills import SkillManager
@@ -15,7 +16,7 @@ from gemma_agent import ui
 
 SYSTEM_PROMPT_TEMPLATE = """You are Gemma CLI Agent, an autonomous AI assistant powered by Google Gemma 4 models.
 You assist users directly in their terminal environment by answering questions, writing code, executing commands, and analyzing files.
-You are equipped with official Google Cloud Agent Skills (google/skills) for GCP infrastructure (Cloud Run, GKE, BigQuery, Vertex AI, Terraform, IAM).
+You are equipped with official Google Cloud Agent Skills (google/skills) for GCP infrastructure (Cloud Run, GKE, BigQuery, AlloyDB, Spanner, and more).
 
 {tool_descriptions}
 
@@ -37,6 +38,31 @@ CRITICAL RULES FOR TOOL EXECUTION:
 }}
 ```
 """
+
+
+def _normalize_args(raw: Any) -> Dict[str, Any]:
+    """Coerce tool-call arguments to a dict.
+
+    Local models frequently emit `arguments` as a JSON-encoded STRING (the
+    OpenAI wire format) instead of an object; passing that through crashes
+    the loop downstream.
+    """
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+    return {}
+
+
+# Anchored patterns for genuine tool failures. Matching anywhere in the text
+# false-positives on file contents/logs that merely mention errors.
+_ERR_PREFIX = re.compile(r"^(Error\b|Tool Execution Error|Web search|Screenshot error|Search error)")
+_ERR_EXIT = re.compile(r"^Exit code:\s*-?[1-9]")
 
 
 class GemmaAgent:
@@ -98,7 +124,7 @@ class GemmaAgent:
 
         for _ in range(max_iterations):
             # Request response from backend with animated spinner
-            with ui.console.status(f"[bold cyan]🧠 Generating response ({self.backend.model_name})...[/bold cyan]", spinner="dots"):
+            with ui.console.status(f"[bold cyan]🧠 Generating response ({escape(self.backend.model_name)})...[/bold cyan]", spinner="dots"):
                 content, tool_calls, metrics = self.backend.generate_response(self.history, tools_schema=tools_schema)
             
             # Aggregate metrics
@@ -112,9 +138,12 @@ class GemmaAgent:
             if thinking_text:
                 ui.print_thinking_panel(thinking_text)
 
-            # Check for ReAct text fallback tool calls if native tool_calls is empty
+            # Check for ReAct text fallback tool calls if native tool_calls is empty.
+            # Some models wrap the tool block inside their <think> section — check there too.
             if not tool_calls:
                 tool_calls = self._parse_json_tool_calls(content)
+            if not tool_calls and thinking_text:
+                tool_calls = self._parse_json_tool_calls(thinking_text)
 
             # If no tool calls requested, we have the final assistant message
             if not tool_calls:
@@ -132,7 +161,8 @@ class GemmaAgent:
             unique_tool_calls = []
             for tc in tool_calls:
                 t_name = tc.get("name") or tc.get("tool")
-                t_args = tc.get("arguments") or tc.get("args") or {}
+                t_args = _normalize_args(tc.get("arguments") or tc.get("args") or {})
+                tc["arguments"] = t_args
                 sig = f"{t_name}:{json.dumps(t_args, sort_keys=True)}"
                 if sig not in executed_signatures:
                     executed_signatures.add(sig)
@@ -156,12 +186,12 @@ class GemmaAgent:
             # Execute tool calls
             for tool_call in unique_tool_calls:
                 tool_name = tool_call.get("name") or tool_call.get("tool")
-                args = tool_call.get("arguments") or tool_call.get("args") or {}
+                args = _normalize_args(tool_call.get("arguments") or tool_call.get("args") or {})
 
                 ui.print_tool_call(tool_name, args)
                 result = self.tools.execute(tool_name, args)
 
-                is_err = result.startswith("Error:") or result.startswith("Tool Execution Error") or bool(re.search(r"Exit code:\s*[1-9]\d*", result))
+                is_err = bool(_ERR_PREFIX.match(result)) or bool(_ERR_EXIT.match(result))
                 ui.print_tool_result(result, is_error=is_err)
 
                 if is_err:
@@ -178,7 +208,17 @@ class GemmaAgent:
                 })
 
         self._strip_dedup_notes()
-        return f"Reached maximum tool execution limit ({max_iterations} iterations)."
+        limit_msg = f"Reached maximum tool execution limit ({max_iterations} iterations)."
+        # Close the turn in history so the next turn's model knows it was cut off,
+        # and report metrics just like a normal turn.
+        self.history.append({"role": "assistant", "content": limit_msg})
+        ui.print_turn_metrics(
+            duration_sec=total_turn_duration,
+            prompt_tokens=total_prompt_tokens,
+            completion_tokens=total_completion_tokens,
+            backend_label=last_backend_label
+        )
+        return limit_msg
 
     def _strip_dedup_notes(self) -> None:
         """Remove mid-turn dedup steering notes so they never leak into later turns."""
@@ -200,31 +240,34 @@ class GemmaAgent:
         if not text:
             return None
         
-        # Match ```json { "tool": "..." } ``` block
-        pattern = r"```json\s*(\{.*?\})\s*```"
-        matches = re.findall(pattern, text, re.DOTALL)
-        
+        # Match fenced JSON blocks: ```json {...} ```, ```JSON, untagged ``` {...} ```,
+        # and top-level arrays of calls.
+        pattern = r"```(?:json)?\s*([\[{].*?[\]}])\s*```"
+        matches = re.findall(pattern, text, re.DOTALL | re.IGNORECASE)
+
         tool_calls = []
         for raw_json in matches:
             try:
                 data = json.loads(raw_json)
-                if "tool" in data:
-                    tool_calls.append({
-                        "name": data["tool"],
-                        "arguments": data.get("arguments", {})
-                    })
             except Exception:
-                pass
-                
+                continue
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                if isinstance(item, dict) and "tool" in item:
+                    tool_calls.append({
+                        "name": item["tool"],
+                        "arguments": _normalize_args(item.get("arguments", {}))
+                    })
+
         if not tool_calls:
             # Fallback inline JSON match
             try:
                 if '"tool":' in text:
                     data = json.loads(text.strip())
-                    if "tool" in data:
+                    if isinstance(data, dict) and "tool" in data:
                         tool_calls.append({
                             "name": data["tool"],
-                            "arguments": data.get("arguments", {})
+                            "arguments": _normalize_args(data.get("arguments", {}))
                         })
             except Exception:
                 pass
@@ -250,7 +293,13 @@ class GemmaAgent:
             thinking_content = "\n\n".join(m.strip() for m in matches if m.strip())
             clean_text = re.sub(pattern, "", text, flags=re.DOTALL).strip()
             return thinking_content, clean_text
-            
+
+        # Truncated generation: an opening <think> with no close tag would
+        # otherwise leak raw reasoning into the final answer and history.
+        if "<think>" in text:
+            pre, _, rest = text.partition("<think>")
+            return (rest.strip() or None), pre.strip()
+
         return None, text
 
 

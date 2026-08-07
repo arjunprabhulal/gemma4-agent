@@ -19,22 +19,32 @@ def _validate_public_url(url: str):
     """SSRF guard: allow only http(s) URLs that resolve to public addresses.
 
     Blocks loopback (e.g. the Ollama control API), link-local (cloud metadata
-    services), RFC1918/private, and reserved ranges.
+    services), RFC1918/private, and reserved ranges. Returns the first
+    validated IP so http connections can be PINNED to it — requests would
+    otherwise re-resolve DNS independently, and a low-TTL rebinding between
+    the two lookups bypasses the check (demonstrated in review).
+
+    Returns:
+        (ok: bool, reason: str, pinned_ip: Optional[str])
     """
     try:
         parsed = urllib.parse.urlparse(url)
         if parsed.scheme not in ("http", "https"):
-            return False, "only http/https URLs are allowed"
+            return False, "only http/https URLs are allowed", None
         host = parsed.hostname
         if not host:
-            return False, "missing host"
+            return False, "missing host", None
+        first_ip = None
         for info in socket.getaddrinfo(host, None):
-            ip = ipaddress.ip_address(str(info[4][0]).split("%")[0])
+            ip_str = str(info[4][0]).split("%")[0]
+            ip = ipaddress.ip_address(ip_str)
             if not ip.is_global:
-                return False, f"'{host}' resolves to a non-public address ({ip})"
-        return True, ""
+                return False, f"'{host}' resolves to a non-public address ({ip})", None
+            if first_ip is None:
+                first_ip = ip_str
+        return True, "", first_ip
     except Exception as e:
-        return False, str(e)
+        return False, str(e), None
 
 
 class ToolRegistry:
@@ -76,6 +86,16 @@ class ToolRegistry:
         """
         if name not in self.tools:
             return f"Error: Tool '{name}' not found."
+        # Models sometimes emit arguments as a JSON-encoded string; coerce it
+        # so the call still runs instead of dying on ** unpacking.
+        if isinstance(kwargs, str):
+            try:
+                parsed = json.loads(kwargs)
+                kwargs = parsed if isinstance(parsed, dict) else None
+            except Exception:
+                kwargs = None
+        if not isinstance(kwargs, dict):
+            return f"Error: Tool '{name}' arguments must be a JSON object."
         try:
             return self.tools[name]["func"](**kwargs)
         except Exception as e:
@@ -203,7 +223,7 @@ class ToolRegistry:
         # 8. Fetch Google Skill Tool
         self.register(
             name="fetch_google_skill",
-            description="Dynamically search and fetch official Google Agent Skills (e.g. gke, cloud-run, bigquery, gemini-api, alloydb, spanner) live from https://github.com/google/skills.",
+            description="Dynamically search and fetch official Google Agent Skills (e.g. gke, cloud-run, bigquery, alloydb, spanner) live from https://github.com/google/skills.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -217,7 +237,7 @@ class ToolRegistry:
         # 9. Take Screenshot Vision Tool
         self.register(
             name="take_screenshot",
-            description="Capture a live screenshot of the macOS screen or active desktop window for visual inspection and UI analysis.",
+            description="Capture a live desktop screenshot to a file (cross-platform via mss, with macOS screencapture fallback) for visual inspection and UI analysis.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -332,21 +352,35 @@ class ToolRegistry:
             return f"Error evaluating Python code: {str(e)}"
 
     def _web_fetch(self, url: str) -> str:
-        ok, why = _validate_public_url(url)
+        ok, why, pinned_ip = _validate_public_url(url)
         if not ok:
             return f"Error: URL blocked ({why})."
         try:
-            headers = {"User-Agent": "GemmaCLI/1.0"}
             resp = None
             for _ in range(4):  # follow up to 3 redirects, re-validating every hop
-                resp = requests.get(url, headers=headers, timeout=15, allow_redirects=False)
+                parsed = urllib.parse.urlparse(url)
+                headers = {"User-Agent": "GemmaCLI/1.0"}
+                fetch_url = url
+                # For plain http, connect to the ALREADY-VALIDATED IP (with a Host
+                # header) so a DNS rebinding between validation and fetch cannot
+                # redirect us to an internal address. For https the certificate
+                # check already binds the connection to the real hostname.
+                if parsed.scheme == "http" and pinned_ip:
+                    netloc = pinned_ip if ":" not in pinned_ip else f"[{pinned_ip}]"
+                    if parsed.port:
+                        netloc += f":{parsed.port}"
+                    fetch_url = urllib.parse.urlunparse(parsed._replace(netloc=netloc))
+                    headers["Host"] = parsed.hostname
+                resp = requests.get(fetch_url, headers=headers, timeout=15, allow_redirects=False)
                 if resp.status_code in (301, 302, 303, 307, 308) and "location" in resp.headers:
                     url = urllib.parse.urljoin(url, resp.headers["location"])
-                    ok, why = _validate_public_url(url)
+                    ok, why, pinned_ip = _validate_public_url(url)
                     if not ok:
                         return f"Error: redirect blocked ({why})."
                     continue
                 break
+            if resp.status_code in (301, 302, 303, 307, 308):
+                return "Error: too many redirects (limit: 3)."
             resp.raise_for_status()
             text = resp.text
             # Simple strip HTML if present

@@ -27,7 +27,7 @@
 ## ✨ Key Features & Capabilities
 
 - 🔒 **100% Private & Local-First**: Runs fully on your hardware via local Ollama inference (`http://localhost:11434`). Zero cloud logging, zero telemetry tracking, and zero API costs.
-- ⚡ **Interactive Lightning REPL**: Features a terminal interface powered by `prompt_toolkit` and `rich`, complete with command history, syntax highlighting, and live slash commands.
+- ⚡ **Interactive Lightning REPL**: Features a terminal interface powered by `prompt_toolkit` and `rich`, complete with command history, syntax-highlighted code previews, and live slash commands.
 - 👁️ **Multimodal Vision Integration**: Include a local image file path (`.png`, `.jpg`, `.webp`) in your prompt and it is auto-detected and fed as base64 frames directly to local Gemma vision models.
 - 🎙️🔊 **2-Way Hands-Free Voice Assistant Mode**: Toggle full voice assistant mode (`/voice`) to speak instructions via microphone and hear agent answers via spoken speaker output.
 - 🛠️ **10 Native Built-in Agent Tools**:
@@ -39,7 +39,7 @@
   - `fetch_google_skill`: Dynamic skill fetcher from [google/skills](https://github.com/google/skills).
   - `take_screenshot`: Cross-platform desktop screenshot via `mss` (native macOS `screencapture` fallback).
   - `ripgrep_search`: High-speed regex code search across large repositories.
-- 🌐 **Dynamic Google Agent Skills Integration**: On-demand download of official Google Cloud skill docs (Cloud Run, GKE, BigQuery, Vertex AI, Terraform), injected into the agent's context.
+- 🌐 **Dynamic Google Agent Skills Integration**: On-demand download of official Google Cloud skill docs (Cloud Run, GKE, BigQuery, AlloyDB, Spanner, and more), injected into the agent's context.
 - 🔌 **Model Context Protocol (MCP) Registry (Experimental)**: Register and list MCP server configurations (`/mcp`). Note: server processes are not yet spawned or queried — full MCP client support is on the roadmap.
 - 🧠 **Deep Reasoning Panels**: Displays `<think>...</think>` step-by-step internal planning before executing tool calls.
 - 📊 **Local Performance Metrics**: Per-turn latency and token consumption, rendered locally in your terminal — never transmitted anywhere.
@@ -129,14 +129,14 @@ Inside the `gemma4-agent` REPL session, use slash commands to manage assistant m
 | Command | Action |
 | :--- | :--- |
 | `/help` | Display interactive CLI help menu and command list |
-| `/voice` | Toggle 2-Way Voice Mode (Microphone Input + Spoken Speaker Output) |
-| `/stop` | Disable Voice Mode and return to keyboard typing |
+| `/voice [seconds]` | Toggle 2-Way Voice Mode, with optional mic wait window (aliases: `/mic`, `/talk`) |
+| `/stop` | Disable Voice Mode and return to keyboard typing (alias: `/pause`) |
 | `/tools` | List all active agent tools |
 | `/skills` | Display active Google Agent Skills (`google/skills`) |
-| `/mcp` | Register and list MCP server configurations (experimental) |
-| `/history` | Display full conversation transcript |
+| `/mcp` | Register, list, or remove MCP server configurations (experimental) |
+| `/history` | Display conversation transcript (200-char preview per message) |
 | `/clear` | Reset conversation state and clear history |
-| `/model <tag>` | Switch active local Gemma model tag on the fly (e.g. `/model gemma4:12b`) |
+| `/model <tag>` | Switch active local Gemma model tag on the fly (e.g. `/model gemma4:12b`; alias: `/backend`) |
 | `/exit` or `/quit` | Exit `gemma4-agent` |
 
 ---
@@ -200,14 +200,14 @@ graph TD
 
 ## 🧪 Running Tests
 
-`gemma4-agent` includes a unit test suite under `tests/`, split by module (`test_agent.py`, `test_backends.py`, `test_tools.py`, `test_mcp.py`, `test_voice_input.py`):
+`gemma4-agent` includes a unit test suite under `tests/`, split by module (`test_agent.py`, `test_backends.py`, `test_tools.py`, `test_skills.py`, `test_mcp.py`, `test_voice_input.py`, `test_cli_e2e.py` — the last drives the real REPL end-to-end):
 
 ```bash
 # Run the full test suite
 python -m unittest discover -s tests -v
 ```
 
-Note: two tests in `test_tools.py` hit the live network (DuckDuckGo, GitHub).
+Note: two tests in `test_tools.py` use the live network (DuckDuckGo, GitHub) and skip themselves when offline.
 
 ---
 

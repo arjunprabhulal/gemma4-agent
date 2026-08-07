@@ -2,7 +2,7 @@
 Gemma Agent Voice Input Module.
 
 Provides smart microphone recording with Voice Activity Detection (VAD)
-and speech-to-text recognition.
+and fully local speech-to-text recognition (PocketSphinx).
 """
 
 import tempfile
@@ -14,6 +14,11 @@ from typing import Optional
 from gemma_agent import ui
 
 
+def _energy(data) -> float:
+    """Mean absolute amplitude, computed in int32 so int16's -32768 cannot overflow."""
+    return float(np.abs(data.astype(np.int32)).mean())
+
+
 def listen_to_microphone(
     silence_timeout: float = 5.0,
     pause_threshold: float = 1.5,
@@ -23,12 +28,17 @@ def listen_to_microphone(
 ) -> Optional[str]:
     """
     Smart Voice Activity Detection (VAD):
-    1. Waits up to `silence_timeout` (5s) for speech to begin. If silent, cancels cleanly.
-    2. Once you start speaking, records continuously as long as you talk.
-    3. Automatically stops recording 1.5s after you finish speaking!
+    1. Waits up to `silence_timeout` seconds for speech to BEGIN (`duration`
+       overrides this wait window; it does not cap recording length).
+       If nothing is heard, cancels cleanly and returns None.
+    2. Once speech starts, records until `pause_threshold` seconds of silence
+       or `max_phrase_limit` seconds total.
+    3. Transcribes locally via PocketSphinx; the recording never leaves the
+       machine and the temp WAV is always deleted.
     """
     if duration is not None:
         silence_timeout = float(duration)
+    wav_path = None
     try:
         import sounddevice as sd
         import speech_recognition as sr
@@ -37,11 +47,11 @@ def listen_to_microphone(
         # microphone records our own TTS output and loops it back as a new instruction.
         ui.wait_for_speech_to_finish()
 
-        ui.print_info("🎙️  Listening to microphone... Speak anytime (5s initial timeout)!")
-        
+        ui.print_info(f"🎙️  Listening to microphone... Speak anytime ({silence_timeout:.0f}s initial timeout)!")
+
         chunk_duration = 0.1  # 100ms per audio chunk
         chunk_samples = int(sample_rate * chunk_duration)
-        
+
         frames = []
         has_started = False
         speech_start_time = None
@@ -49,21 +59,26 @@ def listen_to_microphone(
         start_time = time.time()
 
         # Dynamic energy threshold calibration
-        calibration_frames = []
+        calibration_levels = []
         with sd.InputStream(samplerate=sample_rate, channels=1, dtype='int16') as stream:
-            # Calibrate background noise for 0.3s
+            # Calibrate background noise for 0.3s. Keep the audio — otherwise a
+            # user who starts talking immediately loses their first syllable.
             for _ in range(3):
                 data, _ = stream.read(chunk_samples)
-                calibration_frames.append(np.abs(data).mean())
-            
-            bg_noise = np.mean(calibration_frames) if calibration_frames else 100
-            energy_threshold = max(bg_noise * 2.5, 300)
+                frames.append(data.tobytes())
+                calibration_levels.append(_energy(data))
+
+            bg_noise = np.mean(calibration_levels) if calibration_levels else 100
+            # Cap the threshold: if the user is already speaking during
+            # calibration, bg_noise IS their voice — an uncapped 2.5x multiple
+            # would make detection impossible for the rest of the session.
+            energy_threshold = max(min(bg_noise * 2.5, 3000), 300)
 
             while True:
                 data, overflowed = stream.read(chunk_samples)
                 frames.append(data.tobytes())
-                
-                energy = np.abs(data).mean()
+
+                energy = _energy(data)
                 now = time.time()
 
                 if energy > energy_threshold:
@@ -74,13 +89,15 @@ def listen_to_microphone(
                     last_sound_time = now
 
                 if not has_started:
-                    # Cancel if 5 seconds pass with no speech detected
+                    # Cancel if the wait window passes with no speech detected
                     if now - start_time > silence_timeout:
                         return None
                 else:
-                    # Stop recording 1.5s after you finish talking or max limit reached
-                    if now - last_sound_time > pause_threshold or (now - speech_start_time) > max_phrase_limit:
+                    if now - last_sound_time > pause_threshold:
                         ui.print_info("⚡ Silence detected. Processing your voice instruction...")
+                        break
+                    if (now - speech_start_time) > max_phrase_limit:
+                        ui.print_info(f"⚡ Max phrase length ({max_phrase_limit:.0f}s) reached. Processing your voice instruction...")
                         break
 
         if not frames or not has_started:
@@ -89,35 +106,37 @@ def listen_to_microphone(
         # Save recorded speech to temporary WAV file
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_wav:
             wav_path = temp_wav.name
-            with wave.open(wav_path, 'wb') as wf:
-                wf.setnchannels(1)
-                wf.setsampwidth(2)  # 16-bit
-                wf.setframerate(sample_rate)
-                wf.writeframes(b''.join(frames))
+        with wave.open(wav_path, 'wb') as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)  # 16-bit
+            wf.setframerate(sample_rate)
+            wf.writeframes(b''.join(frames))
 
         # Transcribe speech
         recognizer = sr.Recognizer()
         with sr.AudioFile(wav_path) as source:
             audio_data = recognizer.record(source)
-            try:
-                # 100% local offline transcription via PocketSphinx (no audio leaves the machine)
-                text = recognizer.recognize_sphinx(audio_data)
-                return text.strip()
-            except sr.UnknownValueError:
-                return None
-            except sr.RequestError:
-                ui.print_error("Local speech engine is not installed. Run: pip install pocketsphinx")
-                return None
-            except Exception:
-                return None
-            finally:
-                if os.path.exists(wav_path):
-                    try:
-                        os.remove(wav_path)
-                    except Exception:
-                        pass
+        try:
+            # 100% local offline transcription via PocketSphinx (no audio leaves the machine)
+            text = recognizer.recognize_sphinx(audio_data)
+            return text.strip()
+        except sr.UnknownValueError:
+            return None
+        except sr.RequestError:
+            ui.print_error("Local speech engine is not installed. Run: pip install pocketsphinx")
+            return None
+        except Exception:
+            return None
 
     except Exception as e:
         ui.print_error(f"Voice recording error: {str(e)}")
         ui.print_info("Make sure microphone permissions are granted to your terminal app.")
         return None
+    finally:
+        # The voice recording must never outlive the call, no matter which
+        # path raised — it is a privacy guarantee, not just tidiness.
+        if wav_path and os.path.exists(wav_path):
+            try:
+                os.remove(wav_path)
+            except Exception:
+                pass

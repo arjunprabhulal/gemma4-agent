@@ -15,10 +15,15 @@ from typing import Dict
 class SkillManager:
     """Manages local and dynamic GitHub-hosted agent skills."""
 
-    def __init__(self):
-        """Initialize SkillManager and load cached/local skill files."""
+    def __init__(self, cache_dir: str = None):
+        """Initialize SkillManager and load cached/local skill files.
+
+        Args:
+            cache_dir: Override the skill cache location (used by tests to
+                avoid touching the user's real ~/.gemma).
+        """
         self.skills: Dict[str, Dict[str, str]] = {}
-        self.cache_dir = os.path.expanduser("~/.gemma/skills")
+        self.cache_dir = cache_dir or os.path.expanduser("~/.gemma/skills")
         os.makedirs(self.cache_dir, exist_ok=True)
         self.load_local_skills()
 
@@ -37,7 +42,7 @@ class SkillManager:
                 skill_id = os.path.splitext(filename)[0].lower()
                 self.skills[skill_id] = {
                     "name": skill_id.replace("-", " ").title(),
-                    "description": f"Skill from {filename}"
+                    "description": f"Cached google/skills doc ({filename}), injected on demand via fetch_google_skill"
                 }
 
     def search_and_fetch_github_skill(self, query: str) -> str:
@@ -45,14 +50,17 @@ class SkillManager:
         Dynamically searches and fetches official Agent Skills live from https://github.com/google/skills repository.
         """
         query_slug = re.sub(r'[^a-zA-Z0-9]', '-', query.lower()).strip('-')
-        
-        # Check local cache first
+        if not query_slug:
+            return f"No matching skill found for '{query}'. Try a specific name like 'gke-basics' or 'cloud-run'."
+
+        # Exact-name cache hit (cache files are keyed by the REAL skill folder
+        # name, so a hit here is guaranteed to be the right skill).
         cached_file = os.path.join(self.cache_dir, f"{query_slug}.md")
         if os.path.exists(cached_file):
             try:
                 with open(cached_file, "r", encoding="utf-8") as f:
                     content = f.read()
-                return f"### Cached Google Skill: {query_slug}\n{content}"
+                return f"### Cached Google Skill: {query_slug}\n{content[:4000]}"
             except Exception:
                 pass
 
@@ -61,24 +69,41 @@ class SkillManager:
             url = "https://api.github.com/repos/google/skills/contents/skills/cloud"
             headers = {"User-Agent": "GemmaCLI/1.0", "Accept": "application/vnd.github.v3+json"}
             resp = requests.get(url, headers=headers, timeout=10)
-            
+
             if resp.status_code != 200:
                 return f"Could not query google/skills repository (HTTP {resp.status_code})."
-            
+
             items = resp.json()
+            folders = [i["name"] for i in items if isinstance(i, dict) and "name" in i]
+
+            # Rank matches: exact name, then shortest prefix match, then most
+            # '-'-delimited token overlaps. First-substring-match previously
+            # returned alphabetically-early wrong skills ('gke basics' -> alloydb-basics).
             matched_folder = None
-            
-            # Find best match folder name
-            for item in items:
-                if isinstance(item, dict) and "name" in item:
-                    foldername = item["name"]
-                    if query_slug in foldername or any(q in foldername for q in query_slug.split('-') if len(q) > 2):
-                        matched_folder = foldername
-                        break
-
-
+            if query_slug in folders:
+                matched_folder = query_slug
+            if not matched_folder:
+                prefixed = sorted((f for f in folders if f.startswith(query_slug)), key=len)
+                matched_folder = prefixed[0] if prefixed else None
+            if not matched_folder:
+                tokens = [t for t in query_slug.split('-') if len(t) > 2]
+                best_score = 0
+                for f in folders:
+                    parts = f.split('-')
+                    score = sum(1 for t in tokens if t in parts)
+                    if score > best_score:
+                        best_score, matched_folder = score, f
 
             if matched_folder:
+                # Cache is keyed by the matched folder, never the query — a
+                # query-keyed cache permanently mislabeled wrong matches.
+                cached_file = os.path.join(self.cache_dir, f"{matched_folder}.md")
+                if os.path.exists(cached_file):
+                    try:
+                        with open(cached_file, "r", encoding="utf-8") as f:
+                            return f"### Cached Google Skill: {matched_folder}\n{f.read()[:4000]}"
+                    except Exception:
+                        pass
                 # Raw URL to SKILL.md or README.md inside the skill folder
                 raw_urls = [
                     f"https://raw.githubusercontent.com/google/skills/main/skills/cloud/{matched_folder}/SKILL.md",

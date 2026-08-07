@@ -56,26 +56,23 @@ class BaseBackend:
 
 def _extract_image_paths(content: str) -> Tuple[str, List[str]]:
     """
-    Scan content text for image file paths and extract valid local images for vision input.
+    Detect readable local image file paths mentioned in the text.
 
-    Args:
-        content (str): Raw input prompt content text.
+    The text is returned UNCHANGED — removing mentioned filenames breaks
+    file-operation requests ("delete logo.png" must keep its target). Only
+    readable regular files are attached, so directories or unreadable files
+    named *.png stay visible in the prompt instead of vanishing silently.
 
     Returns:
-        Tuple[str, List[str]]: (Cleaned text without image paths, List of absolute image paths).
+        Tuple[str, List[str]]: (Original text, list of attachable image paths).
     """
     image_paths = []
-    tokens = content.split()
-    clean_tokens = []
-    
-    for t in tokens:
-        clean_t = t.strip("\"'")
-        if os.path.exists(os.path.expanduser(clean_t)) and clean_t.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif')):
-            image_paths.append(os.path.expanduser(clean_t))
-        else:
-            clean_tokens.append(t)
-            
-    return " ".join(clean_tokens), image_paths
+    for t in content.split():
+        clean_t = os.path.expanduser(t.strip("\"'"))
+        if (clean_t.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif'))
+                and os.path.isfile(clean_t) and os.access(clean_t, os.R_OK)):
+            image_paths.append(clean_t)
+    return content, image_paths
 
 
 class LocalGemmaBackend(BaseBackend):
@@ -96,7 +93,10 @@ class LocalGemmaBackend(BaseBackend):
         try:
             r = requests.get(f"{self.host}/api/tags", timeout=3)
             if r.status_code == 200:
-                models = [m['name'] for m in r.json().get('models', [])]
+                try:
+                    models = [m.get('name') or m.get('model', 'unknown') for m in r.json().get('models', [])]
+                except Exception:
+                    return True, f"Connected to Local Ollama ({self.host}), but the model list response was unexpected."
                 return True, f"Connected to Local Ollama ({self.host}). Available models: {', '.join(models) if models else 'None'}"
             return False, f"Local server returned HTTP status {r.status_code}"
         except Exception as e:
@@ -109,16 +109,24 @@ class LocalGemmaBackend(BaseBackend):
     ) -> Tuple[str, Optional[List[Dict[str, Any]]], Dict[str, Any]]:
         url = f"{self.host}/api/chat"
         
+        # Attach images for the most recent USER message wherever it sits in
+        # history — inside a tool loop the user message is no longer last, but
+        # the model still needs the image to synthesize its final answer.
+        last_user_idx = -1
+        for i, m in enumerate(messages):
+            if m.get("role") == "user":
+                last_user_idx = i
+
         ollama_msgs = []
         for idx, m in enumerate(messages):
             role = m["role"]
             content_text = m.get("content") or ""
-            
-            # Only scan image paths for the newest user message to prevent re-encoding historic images
-            is_latest_user = (role == "user" and idx == len(messages) - 1)
-            clean_text, img_paths = _extract_image_paths(content_text) if is_latest_user else (content_text, [])
-            
-            msg_obj: Dict[str, Any] = {"role": role, "content": clean_text or content_text}
+
+            _, img_paths = _extract_image_paths(content_text) if idx == last_user_idx else (content_text, [])
+
+            msg_obj: Dict[str, Any] = {"role": role, "content": content_text}
+            if role == "tool" and m.get("name"):
+                msg_obj["tool_name"] = m["name"]
             
             # Replay tool calls in Ollama's expected schema
             if "tool_calls" in m and m["tool_calls"]:

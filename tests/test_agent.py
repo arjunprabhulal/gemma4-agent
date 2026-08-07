@@ -64,6 +64,26 @@ class TestGemmaAgent(unittest.TestCase):
         tool_msgs = [m for m in agent.history if m.get("role") == "tool"]
         self.assertEqual(len(tool_msgs), 2)
 
+    def test_string_tool_arguments_are_coerced(self):
+        """Arguments arriving as a JSON string (OpenAI wire format) must not crash the loop."""
+        class StrArgsBackend(LocalGemmaBackend):
+            def __init__(self):
+                super().__init__(model_name="stub")
+                self.step = 0
+
+            def generate_response(self, messages, tools_schema=None):
+                self.step += 1
+                if self.step == 1:
+                    return "", [{"name": "python_eval", "arguments": "{\"code\": \"print('coerced-ok')\"}"}], {"duration_sec": 0}
+                return "Done.", None, {"duration_sec": 0}
+
+        agent = GemmaAgent(backend=StrArgsBackend(), tool_registry=ToolRegistry())
+        resp = agent.run_turn("go")
+        self.assertEqual(resp, "Done.")
+        tool_msgs = [m for m in agent.history if m.get("role") == "tool"]
+        self.assertEqual(len(tool_msgs), 1)
+        self.assertIn("coerced-ok", tool_msgs[0]["content"])
+
     def test_iteration_cap_reached(self):
         class EndlessBackend(LocalGemmaBackend):
             def __init__(self):
