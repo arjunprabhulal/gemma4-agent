@@ -19,7 +19,7 @@
 `gemma4-agent` is an open-source, local-first autonomous **multimodal** AI agent for terminal power users, developers, and researchers. Powered by **Google DeepMind's Gemma 4** open models running locally via **Ollama**, it lets you chat, execute terminal tasks, inspect codebases, run scripts, analyze images with Gemma 4's native vision, and talk hands-free (offline speech-to-text in, spoken answers out). **All AI inference and speech processing runs entirely on your machine — no cloud LLM APIs, no API keys, no telemetry.** The optional `web_search`, `web_fetch`, and `fetch_google_skill` tools access the internet only when explicitly invoked; skip them and the agent is fully offline.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/arjunprabhulal/gemma4-agent/main/assets/gemma-agent-cli.png" alt="gemma4-agent interactive REPL — startup banner and /help command list" width="900">
+  <img src="https://raw.githubusercontent.com/arjunprabhulal/gemma4-agent/main/assets/gemma-agent-cli.png?v=2" alt="gemma4-agent interactive REPL — startup banner and /help command list" width="900">
 </p>
 
 ---
