@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+import argparse
+from prompt_toolkit import PromptSession
+from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.history import InMemoryHistory
+from gemma_agent.backends import LocalGemmaBackend
+from gemma_agent.agent import GemmaAgent
+from gemma_agent.tools import ToolRegistry
+from gemma_agent import ui
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="gemma4-agent - Autonomous Local AI Agent powered by Google DeepMind Gemma 4 models."
+    )
+    parser.add_argument(
+        "-m", "--model",
+        default="gemma4:26b",
+        help="Local Gemma model tag (default: 'gemma4:26b')."
+    )
+    parser.add_argument(
+        "--host",
+        default="http://localhost:11434",
+        help="Base URL for local Ollama engine (default: http://localhost:11434)"
+    )
+    parser.add_argument(
+        "-v", "--voice",
+        action="store_true",
+        help="Enable 2-Way Voice Mode (Microphone Input + Spoken Speaker Output)."
+    )
+    parser.add_argument(
+        "--mic-duration",
+        type=int,
+        default=7,
+        help="Microphone listening duration in seconds (default: 7s)."
+    )
+    parser.add_argument(
+        "-e", "--exec",
+        type=str,
+        help="Run a single user query non-interactively and exit."
+    )
+
+    args = parser.parse_args()
+
+    model_name = args.model or "gemma4:26b"
+    backend = LocalGemmaBackend(model_name=model_name, host=args.host)
+    tools = ToolRegistry()
+    agent = GemmaAgent(backend=backend, tool_registry=tools)
+
+    voice_mode = args.voice
+    ui.voice_enabled = args.voice
+
+    # If single execution query requested
+    if args.exec:
+        ui.print_info(f"Running local query with model '{model_name}'...")
+        response = agent.run_turn(args.exec)
+        ui.print_markdown(response, title="Agent Response")
+        return
+
+    # Interactive REPL session
+    ui.print_banner(backend_name="100% LOCAL GEMMA (OLLAMA)", model_name=model_name)
+
+    if voice_mode:
+        ui.print_success("🎙️🔊 2-Way Voice Assistant Mode is ENABLED (Mic Input + Spoken Speaker Output).")
+
+    # Check connection to local backend
+    connected, msg = backend.check_connection()
+    if connected:
+        ui.print_success(msg)
+    else:
+        ui.print_error(msg)
+        ui.print_info("Make sure Ollama is running locally (`ollama serve`).")
+
+    mic_duration = args.mic_duration
+
+    session = PromptSession(history=InMemoryHistory())
+
+    while True:
+        try:
+            if voice_mode:
+                from gemma_agent.voice_input import listen_to_microphone
+                spoken = listen_to_microphone(duration=mic_duration)
+                if spoken:
+                    user_input = spoken
+                    ui.print_success(f"🗣️  Recognized Spoken Instruction: \"{user_input}\"")
+                else:
+                    user_input = session.prompt(HTML("\n<ansiyellow>⚡</ansiyellow> <b>gemma4-agent</b> (Press Enter to mic, or type query) > ")).strip()
+            else:
+                user_input = session.prompt(HTML("\n<ansiyellow>⚡</ansiyellow> <b>gemma4-agent</b> > ")).strip()
+
+            if not user_input:
+                continue
+
+            # Handle slash commands
+            if user_input.startswith("/"):
+                cmd_parts = user_input.split()
+                cmd = cmd_parts[0].lower()
+
+                if cmd in ["/exit", "/quit"]:
+                    ui.print_info("Exiting Gemma 4 CLI Agent. Goodbye! 👋")
+                    break
+                elif cmd == "/help":
+                    ui.print_help()
+                    continue
+                elif cmd == "/clear":
+                    agent.clear_history()
+                    continue
+                elif cmd in ["/voice", "/mic", "/talk"]:
+                    voice_mode = not voice_mode
+                    ui.voice_enabled = voice_mode
+                    if len(cmd_parts) > 1 and cmd_parts[1].isdigit():
+                        mic_duration = int(cmd_parts[1])
+                    status_str = f"ENABLED 🎙️🔊 ({mic_duration}s mic listening)" if voice_mode else "DISABLED 🔇"
+                    ui.print_success(f"Voice Assistant Mode is now {status_str}")
+                    continue
+                elif cmd in ["/stop", "/pause"]:
+                    voice_mode = False
+                    ui.voice_enabled = False
+                    ui.print_success("Voice Assistant Mode is now DISABLED 🔇")
+                    continue
+                elif cmd in ["/model", "/backend"] and len(cmd_parts) > 1:
+                    new_model = cmd_parts[1]
+                    agent.backend.model_name = new_model
+                    ui.print_success(f"Switched local Gemma model tag to '{new_model}'")
+                    continue
+                elif cmd == "/skills":
+                    skills_text = "### ☁️ Active Google Cloud Skills (google/skills)\n\n"
+                    for s_id, s_info in agent.skill_manager.skills.items():
+                        skills_text += f"- **{s_id}**: {s_info['name']}\n  _{s_info['description']}_\n"
+                    ui.print_markdown(skills_text, title="Google Cloud Agent Skills")
+                    continue
+                elif cmd == "/mcp":
+                    from gemma_agent.mcp import MCPManager
+                    mcp_mgr = MCPManager()
+                    if len(cmd_parts) > 2 and cmd_parts[1] == "connect":
+                        srv_name = cmd_parts[2]
+                        srv_cmd = " ".join(cmd_parts[3:]) if len(cmd_parts) > 3 else "npx -y @modelcontextprotocol/server-postgres"
+                        msg = mcp_mgr.connect_server(srv_name, srv_cmd)
+                        ui.print_success(msg)
+                    else:
+                        ui.print_markdown(mcp_mgr.list_servers(), title="Model Context Protocol (MCP)")
+                    continue
+                elif cmd == "/tools":
+                    tool_list = "\n".join(f"- **{t['name']}**: {t['description']}" for t in tools.tools.values())
+                    ui.print_markdown(tool_list, title="Registered Tools")
+                    continue
+                elif cmd == "/history":
+                    ui.print_info(f"History contains {len(agent.history)} messages.")
+                    for m in agent.history:
+                        role = m.get("role")
+                        content = m.get("content", "")
+                        if role != "system":
+                            ui.print_markdown(f"**{role.upper()}**: {content[:200]}...")
+                    continue
+                else:
+                    ui.print_error(f"Unknown command '{cmd}'. Type /help for assistance.")
+                    continue
+
+            # Pause voice mode if user says "stop"
+            if voice_mode and user_input.lower() in ["stop", "stop voice", "pause"]:
+                voice_mode = False
+                ui.voice_enabled = False
+                ui.print_info("Voice mode paused. Switched back to normal typing prompt.")
+                continue
+
+            # Execute turn
+            ui.print_user_prompt(user_input)
+            response = agent.run_turn(user_input)
+            ui.print_markdown(response, title="Gemma Agent")
+
+        except (KeyboardInterrupt, EOFError):
+            ui.print_info("\nSession interrupted. Goodbye!")
+            break
+        except Exception as e:
+            ui.print_error(f"An unexpected error occurred: {str(e)}")
+
+
+if __name__ == "__main__":
+    main()
