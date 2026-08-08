@@ -215,7 +215,11 @@ def listen_to_microphone(
 
         # Transcribe speech — 100% local either way (no audio leaves the machine)
         if engine == "gemma":
-            text = _transcribe_gemma(wav_path, ollama_host)
+            with ui.console.status(
+                "[bold cyan]🧠 Gemma is listening back... (first call loads the 12B — up to ~30s; ~6s after)[/bold cyan]",
+                spinner="dots",
+            ):
+                text = _transcribe_gemma(wav_path, ollama_host)
             if text:
                 return text
             # graceful fallback to Whisper below
