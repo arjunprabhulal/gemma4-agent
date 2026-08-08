@@ -99,6 +99,22 @@ class TestGemmaAgent(unittest.TestCase):
             agent.run_turn("build another adk thing")
         pexec.assert_not_called()
 
+    def test_grounding_triggers_tolerate_plural_phrasing(self):
+        """'What is Agents skills?' (plural) missed the 'agent skills' trigger
+        in the field — casual phrasing variants must still ground."""
+        from unittest.mock import patch
+
+        class QuietBackend(LocalGemmaBackend):
+            def generate_response(self, messages, tools_schema=None):
+                return "ok", None, {"duration_sec": 0}
+
+        agent = GemmaAgent(backend=QuietBackend(model_name="stub"), tool_registry=ToolRegistry())
+        for phrasing in ("What is Agents skills ?", "what is an agent skill",
+                         "how do agent skills work", "explain the SKILL.md format"):
+            with patch.object(agent.tools, "execute", return_value="Result 1: docs") as pexec:
+                agent.run_turn(phrasing)
+            pexec.assert_called_once_with("web_search", {"query": phrasing})
+
     def test_thinking_toggle_rebuilds_system_prompt_in_place(self):
         agent = GemmaAgent(backend=LocalGemmaBackend(model_name="stub"), tool_registry=ToolRegistry())
         self.assertTrue(agent.thinking_enabled)
