@@ -15,6 +15,19 @@ from gemma_agent import ui
 
 
 _WHISPER_MODEL = "base.en"
+# int8 is efficient on CPU and avoids ctranslate2's float16-conversion warning
+_WHISPER_INIT = {"compute_type": "int8"}
+
+
+def _quiet_speech_logs() -> None:
+    """Silence ctranslate2's expected float16->float32 conversion warning so it
+    never interleaves with the voice UX."""
+    try:
+        import logging
+        import ctranslate2
+        ctranslate2.set_log_level(logging.ERROR)
+    except Exception:
+        pass
 
 
 def _energy(data) -> float:
@@ -34,9 +47,10 @@ def ensure_voice_model() -> bool:
     except ImportError:
         ui.print_error("Local speech engine missing. Run: pip install faster-whisper")
         return False
+    _quiet_speech_logs()
     try:
         ui.print_info("🎙️  Preparing local speech model (one-time ~74MB download if not already cached)...")
-        WhisperModel(_WHISPER_MODEL, device="cpu", compute_type="int8")
+        WhisperModel(_WHISPER_MODEL, **_WHISPER_INIT)
         ui.print_success("Local speech model ready — transcription runs fully on-device.")
         return True
     except Exception as e:
@@ -51,8 +65,11 @@ def _transcribe(recognizer, audio_data, sr_module) -> Optional[str]:
     The recording never leaves the machine. First use downloads the base.en
     model (~74MB) from Hugging Face once; every run after that is fully offline.
     """
+    _quiet_speech_logs()
     try:
-        return recognizer.recognize_faster_whisper(audio_data, model=_WHISPER_MODEL)
+        return recognizer.recognize_faster_whisper(
+            audio_data, model=_WHISPER_MODEL, init_options=dict(_WHISPER_INIT)
+        )
     except sr_module.UnknownValueError:
         return None  # audio was unintelligible
     except ImportError as e:
