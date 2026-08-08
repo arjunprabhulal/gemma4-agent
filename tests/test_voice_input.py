@@ -39,6 +39,76 @@ class TestVoiceInput(unittest.TestCase):
         rec.recognize_faster_whisper.side_effect = ImportError("no module named faster_whisper")
         self.assertIsNone(voice_input._transcribe(rec, Mock(), _FakeSR))
 
+    def test_keyboard_interrupt_cancels_recording_not_session(self):
+        """Ctrl+C mid-recording must return None (capture cancelled), never
+        propagate and kill the session — the user-reported ^C^C^C^C case."""
+        import sys
+        import types
+
+        class FakeStream:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self, n):
+                raise KeyboardInterrupt
+
+        fake_sd = types.SimpleNamespace(InputStream=lambda **kw: FakeStream())
+        fake_sr = types.SimpleNamespace()
+        sys.modules["sounddevice"] = fake_sd
+        sys.modules["speech_recognition"] = fake_sr
+        try:
+            out = voice_input.listen_to_microphone(duration=1)
+            self.assertIsNone(out)  # cancelled cleanly, exception did not escape
+        finally:
+            sys.modules.pop("sounddevice", None)
+            sys.modules.pop("speech_recognition", None)
+
+    def test_gemma_engine_transcription(self):
+        """The /voice gemma engine posts input_audio to the verified endpoint."""
+        import json as j
+        import struct
+        import tempfile
+        import wave as wave_mod
+        from unittest.mock import Mock, patch
+        path = tempfile.mktemp(suffix=".wav")
+        with wave_mod.open(path, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(16000)
+            wf.writeframes(struct.pack("<h", 0) * 160)
+        try:
+            resp = Mock()
+            resp.read.return_value = j.dumps(
+                {"choices": [{"message": {"content": ' "hello there" '}}]}).encode()
+            cm = Mock()
+            cm.__enter__ = Mock(return_value=resp)
+            cm.__exit__ = Mock(return_value=False)
+            with patch("urllib.request.urlopen", return_value=cm) as opener:
+                out = voice_input._transcribe_gemma(path, "http://localhost:11434")
+            self.assertEqual(out, "hello there")
+            req = opener.call_args[0][0]
+            self.assertIn("/v1/chat/completions", req.full_url)
+            payload = j.loads(req.data)
+            self.assertEqual(payload["model"], "gemma4:12b")
+            self.assertEqual(payload["messages"][0]["content"][0]["type"], "input_audio")
+        finally:
+            os.remove(path)
+
+    def test_gemma_engine_failure_returns_none(self):
+        """Endpoint failure degrades gracefully (caller falls back to Whisper)."""
+        import tempfile
+        from unittest.mock import patch
+        path = tempfile.mktemp(suffix=".wav")
+        open(path, "wb").write(b"RIFF")
+        try:
+            with patch("urllib.request.urlopen", side_effect=OSError("connection refused")):
+                self.assertIsNone(voice_input._transcribe_gemma(path, "http://localhost:11434"))
+        finally:
+            os.remove(path)
+
     def test_ensure_voice_model_missing_engine(self):
         """Setup reports failure cleanly when faster-whisper is not installed."""
         import sys

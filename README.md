@@ -29,8 +29,8 @@
 - 🔒 **100% Private & Local-First**: Runs fully on your hardware via local Ollama inference (`http://localhost:11434`). Zero cloud logging, zero telemetry tracking, and zero API costs.
 - ⚡ **Interactive Lightning REPL**: Features a terminal interface powered by `prompt_toolkit` and `rich`, complete with command history, syntax-highlighted code previews, and live slash commands.
 - 👁️ **Multimodal Vision Integration**: Include a local image file path (`.png`, `.jpg`, `.webp`) in your prompt and it is auto-detected and fed as base64 frames directly to local Gemma vision models.
-- 🎙️🔊 **2-Way Hands-Free Voice Assistant Mode**: Toggle full voice assistant mode (`/voice`) to speak instructions via microphone and hear agent answers via spoken speaker output. Transcription runs on-device with [Whisper](https://github.com/openai/whisper) via the fast [faster-whisper](https://github.com/SYSTRAN/faster-whisper) implementation — your voice never leaves the machine. (Fetch the ~74MB model during setup with `gemma4-agent --setup-voice`; otherwise it downloads automatically when you first enable voice mode.)
-- 🛠️ **10 Native Built-in Agent Tools**:
+- 🎙️🔊 **2-Way Hands-Free Voice Assistant Mode**: Toggle full voice assistant mode (`/voice`) to speak instructions via microphone and hear agent answers via spoken speaker output — your voice never leaves the machine. Two selectable transcription engines: [Whisper](https://github.com/openai/whisper) via [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (default, ~0.8s/utterance; fetch the ~74MB model with `gemma4-agent --setup-voice`), or **Gemma 4's native hearing** with `/voice gemma` (the audio-capable 12B, ~6s/utterance). Pairing guide: Whisper suits the 26B chat model; `/voice gemma` shines when the 12B is also your chat model (`--model gemma4:12b`) — one resident model, every network is Gemma.
+- 🛠️ **11 Native Built-in Agent Tools**:
   - `bash_run`: Local shell command execution.
   - `read_file` & `write_file`: File inspection and creation.
   - `list_directory`: Local filesystem browser.
@@ -39,6 +39,7 @@
   - `fetch_skill`: Agent Skill fetcher — [google/skills](https://github.com/google/skills) by default, or any GitHub repo using the `SKILL.md` convention (the [skills.sh](https://skills.sh) ecosystem).
   - `take_screenshot`: Cross-platform desktop screenshot via `mss` (native macOS `screencapture` fallback).
   - `ripgrep_search`: High-speed regex code search across large repositories.
+  - `analyze_audio`: Native Gemma 4 audio understanding — transcribe speech or describe sounds in local `.wav`/`.mp3` files (runs on an audio-capable variant like `gemma4:12b`, fully local).
 - 🌐 **Dynamic Agent Skills Integration**: On-demand download of skill docs injected into the agent's context — official Google Cloud skills (Cloud Run, GKE, BigQuery, AlloyDB, Spanner, and more) by default, plus community skills from any GitHub repo using the `SKILL.md` convention. Discover community skills with [`npx skills find`](https://skills.sh) and fetch them by `owner/repo`.
 - 🔌 **Model Context Protocol (MCP) Registry (Experimental)**: Register and list MCP server configurations (`/mcp`). Note: server processes are not yet spawned or queried — full MCP client support is on the roadmap.
 - 🧠 **Deep Reasoning Panels**: Displays `<think>...</think>` step-by-step internal planning before executing tool calls.
@@ -56,7 +57,7 @@
 | **Language** | Core Runtime | **Python 3.10+** | Agent execution loop, tool invocation, and CLI parser |
 | **AI Backend** | LLM Inference | **Ollama** | Local 100% private engine for **Google DeepMind Gemma 4** models |
 | **UI & REPL** | Terminal Interface | **`prompt_toolkit` & `rich`** | History REPL, HTML/ANSI formatting, markdown panels, and tables |
-| **Audio & Speech** | 2-Way Voice Mode | **`sounddevice` & `SpeechRecognition` + local Whisper (`faster-whisper`)** | Fully local microphone transcription with pause detection & native speech output |
+| **Audio & Speech** | 2-Way Voice Mode | **`sounddevice` + local Whisper (`faster-whisper`) or Gemma 4 native hearing (12B)** | Fully local microphone transcription with pause detection & native speech output |
 | **Multimodal Vision** | Screenshot Tool | **`mss` (Python Screen Capture)** | Local desktop frame capture for Gemma vision model analysis |
 | **Code Search** | Fast Repository Search | **`ripgrep` (`rg`)** | Lightning-fast regex code search across project directories |
 | **Agent Skills** | Skill Repositories | **GitHub REST API (anonymous — no account or token needed)** | On-demand `SKILL.md` fetching from [`google/skills`](https://github.com/google/skills) and any community skill repo ([skills.sh](https://skills.sh) ecosystem), cached locally after first fetch |
@@ -140,7 +141,7 @@ Inside the `gemma4-agent` REPL session, use slash commands to manage assistant m
 | Command | Action |
 | :--- | :--- |
 | `/help` | Display interactive CLI help menu and command list |
-| `/voice [seconds]` | Toggle 2-Way Voice Mode, with optional mic wait window (aliases: `/mic`, `/talk`) |
+| `/voice [seconds] [gemma\|whisper]` | Toggle 2-Way Voice Mode — optional wait window and transcription engine: Whisper (default, ~0.8s) or Gemma 4's native hearing via the 12B (~6s, "every network is Gemma") |
 | `/stop` | Disable Voice Mode and return to keyboard typing (alias: `/pause`) |
 | `/tools` | List all active agent tools |
 | `/skills` | Display cached Agent Skills (`/skills clear` resets the cache) |
@@ -169,6 +170,7 @@ Inside the `gemma4-agent` REPL session, use slash commands to manage assistant m
 | `fetch_skill` | `skill_name`, `source` (optional) | Fetch an Agent Skill from `google/skills` (default) or any GitHub `owner/repo` with `SKILL.md` files |
 | `take_screenshot` | `filename` | Capture desktop screenshot to a file (`mss`, cross-platform; macOS fallback); reference the saved path in a follow-up prompt for vision analysis |
 | `ripgrep_search` | `query`, `path` | High-speed regex code search across files |
+| `analyze_audio` | `filepath`, `question` (optional) | Transcribe or describe a local audio file via Gemma 4's native audio input (requires `gemma4:12b`) |
 
 ---
 
@@ -186,13 +188,13 @@ Inside the `gemma4-agent` REPL session, use slash commands to manage assistant m
 graph TD
     subgraph LOCAL["⚡ Gemma4 Agent — 100% Local & Private"]
         User["⌨️ Terminal User"] --> CLI["cli.py — Lightning REPL"]
-        Mic["🎙️ Microphone"] --> Voice["voice_input.py — VAD + local Whisper STT (faster-whisper)"]
+        Mic["🎙️ Microphone"] --> Voice["voice_input.py — VAD + STT (Whisper default · Gemma 12B native)"]
         Voice --> CLI
         CLI --> Agent["agent.py — GemmaAgent Orchestrator"]
         Agent <--> Backend["backends.py — LocalGemmaBackend"]
         Backend <--> Ollama["Ollama — localhost:11434 (Gemma 4 + Vision)"]
-        Agent <--> Registry["tools.py — ToolRegistry (10 tools)"]
-        Registry --> SystemTools["Bash · Files · Python · Screenshot · ripgrep"]
+        Agent <--> Registry["tools.py — ToolRegistry (11 tools)"]
+        Registry --> SystemTools["Bash · Files · Python · Screenshot · ripgrep · Audio"]
         Registry --> Skills["skills.py — SkillManager"]
         CLI --> MCP["mcp.py — MCP config registry (experimental)"]
         Agent --> UI["ui.py — Rich Renderer + TTS"]

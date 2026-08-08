@@ -59,6 +59,41 @@ def ensure_voice_model() -> bool:
         return False
 
 
+def _transcribe_gemma(wav_path: str, ollama_host: str) -> Optional[str]:
+    """Transcribe via Gemma 4's native audio (12B) through Ollama's OpenAI-
+    compatible endpoint — the 'every network is Gemma' option. Measured ~6s
+    per utterance vs ~0.8s for Whisper on an M4 Pro; chosen explicitly via
+    `/voice gemma`, never by default."""
+    import base64
+    import json
+    import urllib.request
+    try:
+        with open(wav_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode()
+        payload = {
+            "model": "gemma4:12b",
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "input_audio", "input_audio": {"data": b64, "format": "wav"}},
+                    {"type": "text", "text": "Transcribe exactly what was said. Output only the transcription, nothing else."},
+                ],
+            }],
+        }
+        req = urllib.request.Request(
+            f"{ollama_host.rstrip('/')}/v1/chat/completions",
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=180) as r:
+            d = json.load(r)
+        text = d.get("choices", [{}])[0].get("message", {}).get("content", "")
+        return text.strip().strip('"') or None
+    except Exception as e:
+        ui.print_error(f"Gemma transcription failed ({e}); is gemma4:12b pulled? Falling back to Whisper.")
+        return None
+
+
 def _transcribe(recognizer, audio_data, sr_module) -> Optional[str]:
     """Transcribe on-device with local Whisper (faster-whisper implementation).
 
@@ -88,7 +123,9 @@ def listen_to_microphone(
     pause_threshold: float = 1.5,
     max_phrase_limit: float = 30.0,
     sample_rate: int = 16000,
-    duration: Optional[float] = None
+    duration: Optional[float] = None,
+    engine: str = "whisper",
+    ollama_host: str = "http://localhost:11434",
 ) -> Optional[str]:
     """
     Smart Voice Activity Detection (VAD):
@@ -177,12 +214,22 @@ def listen_to_microphone(
             wf.writeframes(b''.join(frames))
 
         # Transcribe speech — 100% local either way (no audio leaves the machine)
+        if engine == "gemma":
+            with ui.console.status("[bold cyan]🧠 Gemma transcribing...[/bold cyan]", spinner="dots"):
+                text = _transcribe_gemma(wav_path, ollama_host)
+            if text:
+                return text
+            # graceful fallback to Whisper below
         recognizer = sr.Recognizer()
         with sr.AudioFile(wav_path) as source:
             audio_data = recognizer.record(source)
         text = _transcribe(recognizer, audio_data, sr)
         return text.strip() if text else None
 
+    except KeyboardInterrupt:
+        # Ctrl+C during listening/recording cancels THIS capture, not the session
+        ui.print_info("Recording cancelled.")
+        return None
     except Exception as e:
         ui.print_error(f"Voice recording error: {str(e)}")
         ui.print_info("Make sure microphone permissions are granted to your terminal app.")

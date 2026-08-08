@@ -90,7 +90,7 @@ def main():
 
     model_name = args.model or "gemma4:26b"
     backend = LocalGemmaBackend(model_name=model_name, host=args.host)
-    tools = ToolRegistry()
+    tools = ToolRegistry(ollama_host=args.host)
     agent = GemmaAgent(backend=backend, tool_registry=tools)
 
     def _confirm_tool(tool_name: str, tool_args: dict) -> bool:
@@ -134,6 +134,7 @@ def main():
         ui.print_info("Make sure Ollama is running locally (`ollama serve`).")
 
     mic_duration = args.mic_duration
+    voice_engine = "whisper"
 
     session = PromptSession(history=InMemoryHistory())
 
@@ -141,7 +142,7 @@ def main():
         try:
             if voice_mode:
                 from gemma_agent.voice_input import listen_to_microphone
-                spoken = listen_to_microphone(duration=mic_duration)
+                spoken = listen_to_microphone(duration=mic_duration, engine=voice_engine, ollama_host=args.host)
                 if spoken:
                     user_input = spoken
                     ui.print_success(f"🗣️  Recognized Spoken Instruction: \"{user_input}\"")
@@ -169,15 +170,30 @@ def main():
                     agent.clear_history()
                     continue
                 elif cmd in ["/voice", "/mic", "/talk"]:
-                    voice_mode = not voice_mode
+                    was_on = voice_mode
+                    options_given = False
+                    for part in cmd_parts[1:]:
+                        p = part.lower()
+                        if p.isdigit():
+                            mic_duration = max(1, int(p))  # 0 would cancel the mic instantly
+                            options_given = True
+                        elif p in ("gemma", "whisper"):
+                            voice_engine = p
+                            options_given = True
+                        elif p == "engine":
+                            continue  # allow '/voice engine gemma' phrasing
+                        else:
+                            ui.print_error(f"Unknown /voice option '{part}' — usage: /voice [seconds] [gemma|whisper]")
+                    # Passing options while already listening reconfigures; bare /voice toggles
+                    voice_mode = True if (options_given and was_on) else not was_on
                     ui.voice_enabled = voice_mode
-                    if len(cmd_parts) > 1 and cmd_parts[1].isdigit():
-                        mic_duration = max(1, int(cmd_parts[1]))  # 0 would cancel the mic instantly
-                    status_str = f"ENABLED 🎙️🔊 ({mic_duration}s speech-wait window)" if voice_mode else "DISABLED 🔇"
-                    ui.print_success(f"Voice Assistant Mode is now {status_str}")
                     if voice_mode:
+                        ui.print_success(f"Voice Assistant Mode is now ENABLED 🎙️🔊 ({mic_duration}s speech-wait · {voice_engine} ears)")
                         from gemma_agent.voice_input import ensure_voice_model
-                        ensure_voice_model()
+                        if voice_engine == "whisper":
+                            ensure_voice_model()
+                    else:
+                        ui.print_success("Voice Assistant Mode is now DISABLED 🔇")
                     continue
                 elif cmd in ["/stop", "/pause"]:
                     voice_mode = False
@@ -280,9 +296,13 @@ def main():
                 ui.print_info("Voice mode paused. Switched back to normal typing prompt.")
                 continue
 
-            # Execute turn
+            # Execute turn (Ctrl+C cancels the turn, not the session)
             ui.print_user_prompt(user_input)
-            response = agent.run_turn(user_input)
+            try:
+                response = agent.run_turn(user_input)
+            except KeyboardInterrupt:
+                ui.print_info("Turn cancelled.")
+                continue
             ui.print_markdown(response, title="Gemma Agent")
 
         except (KeyboardInterrupt, EOFError):
