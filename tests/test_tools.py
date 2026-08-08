@@ -1,6 +1,6 @@
 """Tests for the ToolRegistry and its built-in tools.
 
-Note: web_search and fetch_google_skill hit the live network (DuckDuckGo,
+Note: web_search and fetch_skill hit the live network (DuckDuckGo,
 GitHub) — they skip when the network is unavailable rather than passing
 vacuously. Skill fetching uses a temp cache dir so tests never write to the
 user's real ~/.gemma.
@@ -22,7 +22,7 @@ class TestToolRegistry(unittest.TestCase):
 
         expected_tools = [
             "bash_run", "read_file", "write_file", "list_directory",
-            "python_eval", "web_fetch", "web_search", "fetch_google_skill",
+            "python_eval", "web_fetch", "web_search", "fetch_skill",
             "take_screenshot", "ripgrep_search"
         ]
         for t in expected_tools:
@@ -72,11 +72,11 @@ class TestToolRegistry(unittest.TestCase):
             self.skipTest(f"web search unavailable: {res[:80]}")
         self.assertTrue(len(res) > 20)
 
-    def test_fetch_google_skill_tool(self):
+    def test_fetch_skill_tool(self):
         with tempfile.TemporaryDirectory() as td:
             sm = SkillManager(cache_dir=os.path.join(td, "skills"))
             tools = ToolRegistry(skill_manager=sm)
-            res = tools.execute("fetch_google_skill", {"skill_name": "gke-basics"})
+            res = tools.execute("fetch_skill", {"skill_name": "gke-basics"})
             if "Could not query" in res or "Error fetching" in res:
                 self.skipTest(f"GitHub unavailable: {res[:80]}")
             # The returned skill must actually be the requested one

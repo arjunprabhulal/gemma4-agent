@@ -220,18 +220,23 @@ class ToolRegistry:
             func=self._web_search
         )
 
-        # 8. Fetch Google Skill Tool
+        # 8. Fetch Agent Skill Tool
         self.register(
-            name="fetch_google_skill",
-            description="Dynamically search and fetch official Google Agent Skills (e.g. gke, cloud-run, bigquery, alloydb, spanner) live from https://github.com/google/skills.",
+            name="fetch_skill",
+            description=(
+                "Fetch an Agent Skill (SKILL.md instructions) into context from a GitHub repo. "
+                "Defaults to Google's official google/skills (e.g. gke, cloud-run, bigquery, alloydb, spanner); "
+                "pass source='owner/repo' for community skill repos such as vercel-labs/skills."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
-                    "skill_name": {"type": "string", "description": "Name or topic of the skill (e.g., 'gke', 'cloud-run', 'bigquery', 'gemini-api')."}
+                    "skill_name": {"type": "string", "description": "Name or topic of the skill (e.g., 'gke-basics', 'cloud-run', 'find-skills')."},
+                    "source": {"type": "string", "description": "Optional GitHub 'owner/repo' to fetch from (default: 'google/skills')."}
                 },
                 "required": ["skill_name"]
             },
-            func=self._fetch_google_skill
+            func=self._fetch_skill
         )
 
         # 9. Take Screenshot Vision Tool
@@ -412,12 +417,12 @@ class ToolRegistry:
         except Exception as e:
             return f"Web search error: {str(e)}"
 
-    def _fetch_google_skill(self, skill_name: str) -> str:
+    def _fetch_skill(self, skill_name: str, source: str = "google/skills") -> str:
         if self.skill_manager:
-            return self.skill_manager.search_and_fetch_github_skill(skill_name)
+            return self.skill_manager.search_and_fetch_github_skill(skill_name, source=source)
         from gemma_agent.skills import SkillManager
         sm = SkillManager()
-        return sm.search_and_fetch_github_skill(skill_name)
+        return sm.search_and_fetch_github_skill(skill_name, source=source)
 
     def _take_screenshot(self, filename: Optional[str] = None) -> str:
         target_path = filename or "/tmp/gemma_screenshot.png"

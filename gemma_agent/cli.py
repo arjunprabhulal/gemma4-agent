@@ -143,13 +143,13 @@ def main():
                         ui.print_info(f"Current model: '{agent.backend.model_name}' — usage: /model <tag> (e.g. /model gemma4:12b)")
                     continue
                 elif cmd == "/skills":
-                    skills_text = "### ☁️ Active Google Cloud Skills (google/skills)\n\n"
+                    skills_text = "### ☁️ Active Agent Skills\n\n"
                     if agent.skill_manager.skills:
                         for s_id, s_info in agent.skill_manager.skills.items():
                             skills_text += f"- **{s_id}** — {s_info['description']}\n"
                     else:
-                        skills_text += "_No skills cached yet — ask the agent about any Google Cloud topic and it will fetch the official skill on demand._\n"
-                    ui.print_markdown(skills_text, title="Google Cloud Agent Skills", speak=False)
+                        skills_text += "_No skills cached yet — ask the agent about a Google Cloud topic (or any repo with SKILL.md files) and it will fetch the skill on demand._\n"
+                    ui.print_markdown(skills_text, title="Agent Skills", speak=False)
                     continue
                 elif cmd == "/mcp":
                     from gemma_agent.mcp import MCPManager

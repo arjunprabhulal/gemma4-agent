@@ -1,15 +1,20 @@
 """
 Gemma Agent Skill Manager Module.
 
-Loads local agent skills and dynamically fetches official Google Cloud skills
-live from the https://github.com/google/skills repository.
+Loads local agent skills and dynamically fetches Agent Skills from any GitHub
+repository following the SKILL.md convention (the format indexed by skills.sh).
+Defaults to Google's official https://github.com/google/skills repository.
 """
 
 import os
 import glob
 import re
 import requests
-from typing import Dict
+from typing import Dict, Optional
+
+DEFAULT_SOURCE = "google/skills"
+_SOURCE_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+_HEADERS = {"User-Agent": "GemmaCLI/1.0", "Accept": "application/vnd.github.v3+json"}
 
 
 class SkillManager:
@@ -42,103 +47,135 @@ class SkillManager:
                 skill_id = os.path.splitext(filename)[0].lower()
                 self.skills[skill_id] = {
                     "name": skill_id.replace("-", " ").title(),
-                    "description": f"Cached google/skills doc ({filename}), injected on demand via fetch_google_skill"
+                    "description": f"Cached skill doc ({filename}), injected on demand via fetch_skill"
                 }
 
-    def search_and_fetch_github_skill(self, query: str) -> str:
+    def _cache_filename(self, source: str, skill: str) -> str:
+        # Default-source cache keeps plain names for backwards compatibility;
+        # other sources are prefixed so skills from different repos can't collide.
+        if source == DEFAULT_SOURCE:
+            return f"{skill}.md"
+        return f"{source.replace('/', '--')}--{skill}.md"
+
+    def _read_cache(self, source: str, skill: str) -> Optional[str]:
+        path = os.path.join(self.cache_dir, self._cache_filename(source, skill))
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return f.read()
+            except Exception:
+                pass
+        return None
+
+    @staticmethod
+    def _rank_match(query_slug: str, names) -> Optional[str]:
+        """Exact name, then shortest prefix match, then most '-'-token overlaps.
+
+        First-substring-match previously returned alphabetically-early wrong
+        skills ('gke basics' -> alloydb-basics), so ranking is deliberate.
         """
-        Dynamically searches and fetches official Agent Skills live from https://github.com/google/skills repository.
+        names = list(names)
+        if query_slug in names:
+            return query_slug
+        prefixed = sorted((n for n in names if n.startswith(query_slug)), key=len)
+        if prefixed:
+            return prefixed[0]
+        tokens = [t for t in query_slug.split('-') if len(t) > 2]
+        best_score, best = 0, None
+        for n in names:
+            parts = n.split('-')
+            score = sum(1 for t in tokens if t in parts)
+            if score > best_score:
+                best_score, best = score, n
+        return best
+
+    def search_and_fetch_github_skill(self, query: str, source: str = DEFAULT_SOURCE) -> str:
+        """Fetch an Agent Skill's SKILL.md from a GitHub repository.
+
+        Works with any repo following the SKILL.md convention (google/skills,
+        vercel-labs/skills, ...): the repo tree is scanned for SKILL.md files
+        wherever they live, so no folder layout is assumed.
         """
+        source = (source or DEFAULT_SOURCE).strip().strip("/")
+        if not _SOURCE_RE.match(source):
+            return f"Error: invalid skill source '{source}' — expected GitHub 'owner/repo' format."
+
         query_slug = re.sub(r'[^a-zA-Z0-9]', '-', query.lower()).strip('-')
         if not query_slug:
-            return f"No matching skill found for '{query}'. Try a specific name like 'gke-basics' or 'cloud-run'."
+            return f"No matching skill found for '{query}'. Try a specific name like 'gke-basics'."
 
-        # Exact-name cache hit (cache files are keyed by the REAL skill folder
-        # name, so a hit here is guaranteed to be the right skill).
-        cached_file = os.path.join(self.cache_dir, f"{query_slug}.md")
-        if os.path.exists(cached_file):
+        # Exact-name cache hit (cache files are keyed by the REAL skill name,
+        # so a hit here is guaranteed to be the right skill).
+        cached = self._read_cache(source, query_slug)
+        if cached is not None:
+            return f"### Cached Skill ({source}): {query_slug}\n{cached[:4000]}"
+
+        try:
+            # One tree call finds every SKILL.md regardless of folder layout.
+            tree_url = f"https://api.github.com/repos/{source}/git/trees/HEAD?recursive=1"
+            resp = requests.get(tree_url, headers=_HEADERS, timeout=10)
+            if resp.status_code != 200:
+                return f"Could not query the {source} repository (HTTP {resp.status_code})."
+
+            data = resp.json()
+            skill_paths: Dict[str, str] = {}
+            for entry in data.get("tree", []):
+                path = entry.get("path", "")
+                if entry.get("type") == "blob" and path.endswith("SKILL.md"):
+                    parent = os.path.basename(os.path.dirname(path)).lower()
+                    name = parent or source.split("/")[1].lower()
+                    # Prefer the shallowest path when names collide
+                    if name not in skill_paths or path.count("/") < skill_paths[name].count("/"):
+                        skill_paths[name] = path
+
+            if not skill_paths:
+                return f"No SKILL.md files found in {source}."
+
+            matched = self._rank_match(query_slug, skill_paths.keys())
+            if not matched:
+                sample = ", ".join(sorted(skill_paths)[:10])
+                return f"No matching skill found in {source} for '{query}'. Available include: {sample}"
+
+            # Matched-name cache hit (cache is keyed by the matched skill,
+            # never the query — a query-keyed cache mislabeled wrong matches).
+            cached = self._read_cache(source, matched)
+            if cached is not None:
+                return f"### Cached Skill ({source}): {matched}\n{cached[:4000]}"
+
+            raw_url = f"https://raw.githubusercontent.com/{source}/HEAD/{skill_paths[matched]}"
+            r_resp = requests.get(raw_url, headers=_HEADERS, timeout=10)
+            if r_resp.status_code != 200:
+                return f"Found skill '{matched}' in {source} but could not download it (HTTP {r_resp.status_code})."
+            content = r_resp.text
+
+            # Save to local cache for fast offline access next time
             try:
-                with open(cached_file, "r", encoding="utf-8") as f:
-                    content = f.read()
-                return f"### Cached Google Skill: {query_slug}\n{content[:4000]}"
+                cache_path = os.path.join(self.cache_dir, self._cache_filename(source, matched))
+                with open(cache_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                self.skills[matched] = {
+                    "name": matched.replace("-", " ").title(),
+                    "description": f"Fetched from {source} ({matched})"
+                }
             except Exception:
                 pass
 
-        try:
-            # Query GitHub API for google/skills repository tree
-            url = "https://api.github.com/repos/google/skills/contents/skills/cloud"
-            headers = {"User-Agent": "GemmaCLI/1.0", "Accept": "application/vnd.github.v3+json"}
-            resp = requests.get(url, headers=headers, timeout=10)
-
-            if resp.status_code != 200:
-                return f"Could not query google/skills repository (HTTP {resp.status_code})."
-
-            items = resp.json()
-            folders = [i["name"] for i in items if isinstance(i, dict) and "name" in i]
-
-            # Rank matches: exact name, then shortest prefix match, then most
-            # '-'-delimited token overlaps. First-substring-match previously
-            # returned alphabetically-early wrong skills ('gke basics' -> alloydb-basics).
-            matched_folder = None
-            if query_slug in folders:
-                matched_folder = query_slug
-            if not matched_folder:
-                prefixed = sorted((f for f in folders if f.startswith(query_slug)), key=len)
-                matched_folder = prefixed[0] if prefixed else None
-            if not matched_folder:
-                tokens = [t for t in query_slug.split('-') if len(t) > 2]
-                best_score = 0
-                for f in folders:
-                    parts = f.split('-')
-                    score = sum(1 for t in tokens if t in parts)
-                    if score > best_score:
-                        best_score, matched_folder = score, f
-
-            if matched_folder:
-                # Cache is keyed by the matched folder, never the query — a
-                # query-keyed cache permanently mislabeled wrong matches.
-                cached_file = os.path.join(self.cache_dir, f"{matched_folder}.md")
-                if os.path.exists(cached_file):
-                    try:
-                        with open(cached_file, "r", encoding="utf-8") as f:
-                            return f"### Cached Google Skill: {matched_folder}\n{f.read()[:4000]}"
-                    except Exception:
-                        pass
-                # Raw URL to SKILL.md or README.md inside the skill folder
-                raw_urls = [
-                    f"https://raw.githubusercontent.com/google/skills/main/skills/cloud/{matched_folder}/SKILL.md",
-                    f"https://raw.githubusercontent.com/google/skills/main/skills/cloud/{matched_folder}/README.md"
-                ]
-                
-                content = ""
-                for rurl in raw_urls:
-                    r_resp = requests.get(rurl, headers=headers, timeout=10)
-                    if r_resp.status_code == 200:
-                        content = r_resp.text
-                        break
-
-                if content:
-                    # Save to local cache for fast offline access next time
-                    try:
-                        with open(cached_file, "w", encoding="utf-8") as f:
-                            f.write(content)
-                        self.skills[matched_folder] = {
-                            "name": matched_folder.replace("-", " ").title(),
-                            "description": f"Fetched from google/skills ({matched_folder})"
-                        }
-                    except Exception:
-                        pass
-                        
-                    return f"### Official Google Skill: {matched_folder}\n{content[:4000]}"
-
-            return f"No exact matching skill found in google/skills for '{query}'. Available skills can be searched on https://github.com/google/skills."
+            return f"### Skill from {source}: {matched}\n{content[:4000]}"
         except Exception as e:
-            return f"Error fetching skill from google/skills repository: {str(e)}"
+            return f"Error fetching skill from {source}: {str(e)}"
 
     def get_all_skills_system_prompt(self) -> str:
         """
-        Returns summary instructions on how Gemma 4 can use fetch_google_skill to dynamically query any skill on demand.
+        Returns instructions on using fetch_skill to pull Agent Skills on demand.
         """
-        prompt = "\n\nDYNAMIC GOOGLE SKILLS INTEGRATION (google/skills):\n"
-        prompt += "You have access to the `fetch_google_skill` tool. Whenever the user requests any specialized Google Cloud, coding, AI, database, or architecture task, call `fetch_google_skill(skill_name='...')` to dynamically download the official Google skill documentation from https://github.com/google/skills!\n"
+        prompt = "\n\nDYNAMIC AGENT SKILLS INTEGRATION:\n"
+        prompt += (
+            "You have access to the `fetch_skill` tool. For specialized Google Cloud, coding, AI, "
+            "database, or architecture tasks, call `fetch_skill(skill_name='...')` to pull official "
+            "Google skill documentation from https://github.com/google/skills into context. "
+            "Community skills from any GitHub repo using the SKILL.md convention are also supported "
+            "via the optional source argument, e.g. fetch_skill(skill_name='find-skills', source='vercel-labs/skills'). "
+            "To discover community skills, if the `npx` command is available you may run "
+            "`npx skills find <topic>` via bash_run, then fetch the chosen skill by its owner/repo.\n"
+        )
         return prompt

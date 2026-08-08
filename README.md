@@ -16,7 +16,7 @@
 
 ## 💡 What is `gemma4-agent`?
 
-`gemma4-agent` is an open-source, local-first autonomous **multimodal** AI agent for terminal power users, developers, and researchers. Powered by **Google DeepMind's Gemma 4** open models running locally via **Ollama**, it lets you chat, execute terminal tasks, inspect codebases, run scripts, analyze images with Gemma 4's native vision, and talk hands-free (offline speech-to-text in, spoken answers out). **All AI inference and speech processing runs entirely on your machine — no cloud LLM APIs, no API keys, no telemetry.** The optional `web_search`, `web_fetch`, and `fetch_google_skill` tools access the internet only when explicitly invoked; skip them and the agent is fully offline.
+`gemma4-agent` is an open-source, local-first autonomous **multimodal** AI agent for terminal power users, developers, and researchers. Powered by **Google DeepMind's Gemma 4** open models running locally via **Ollama**, it lets you chat, execute terminal tasks, inspect codebases, run scripts, analyze images with Gemma 4's native vision, and talk hands-free (offline speech-to-text in, spoken answers out). **All AI inference and speech processing runs entirely on your machine — no cloud LLM APIs, no API keys, no telemetry.** The optional `web_search`, `web_fetch`, and `fetch_skill` tools access the internet only when explicitly invoked; skip them and the agent is fully offline.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/arjunprabhulal/gemma4-agent/main/assets/gemma-agent-cli.png?v=2" alt="gemma4-agent interactive REPL — startup banner and /help command list" width="900">
@@ -36,10 +36,10 @@
   - `list_directory`: Local filesystem browser.
   - `python_eval`: On-the-fly Python script evaluator.
   - `web_fetch` & `web_search`: Privacy-focused web content extraction.
-  - `fetch_google_skill`: Dynamic skill fetcher from [google/skills](https://github.com/google/skills).
+  - `fetch_skill`: Agent Skill fetcher — [google/skills](https://github.com/google/skills) by default, or any GitHub repo using the `SKILL.md` convention (the [skills.sh](https://skills.sh) ecosystem).
   - `take_screenshot`: Cross-platform desktop screenshot via `mss` (native macOS `screencapture` fallback).
   - `ripgrep_search`: High-speed regex code search across large repositories.
-- 🌐 **Dynamic Google Agent Skills Integration**: On-demand download of official Google Cloud skill docs (Cloud Run, GKE, BigQuery, AlloyDB, Spanner, and more), injected into the agent's context.
+- 🌐 **Dynamic Agent Skills Integration**: On-demand download of skill docs injected into the agent's context — official Google Cloud skills (Cloud Run, GKE, BigQuery, AlloyDB, Spanner, and more) by default, plus community skills from any GitHub repo using the `SKILL.md` convention. Discover community skills with [`npx skills find`](https://skills.sh) and fetch them by `owner/repo`.
 - 🔌 **Model Context Protocol (MCP) Registry (Experimental)**: Register and list MCP server configurations (`/mcp`). Note: server processes are not yet spawned or queried — full MCP client support is on the roadmap.
 - 🧠 **Deep Reasoning Panels**: Displays `<think>...</think>` step-by-step internal planning before executing tool calls.
 - 📊 **Local Performance Metrics**: Per-turn latency and token consumption, rendered locally in your terminal — never transmitted anywhere.
@@ -56,7 +56,7 @@
 | **Audio & Speech** | 2-Way Voice Mode | **`sounddevice` & `SpeechRecognition` + local Whisper (`faster-whisper`)** | Fully local microphone transcription with pause detection & native speech output |
 | **Multimodal Vision** | Screenshot Tool | **`mss` (Python Screen Capture)** | Local desktop frame capture for Gemma vision model analysis |
 | **Code Search** | Fast Repository Search | **`ripgrep` (`rg`)** | Lightning-fast regex code search across project directories |
-| **Cloud Skills** | Skill Repository | **GitHub REST API** | Dynamic on-demand skills fetching from [`google/skills`](https://github.com/google/skills) |
+| **Agent Skills** | Skill Repositories | **GitHub REST API (anonymous — no account or token needed)** | On-demand `SKILL.md` fetching from [`google/skills`](https://github.com/google/skills) and any community skill repo ([skills.sh](https://skills.sh) ecosystem), cached locally after first fetch |
 | **Extensibility** | Tool Protocol | **Model Context Protocol (MCP)** | Experimental server-config registry (full MCP client on the roadmap) |
 
 ## 📋 Prerequisites
@@ -140,7 +140,7 @@ Inside the `gemma4-agent` REPL session, use slash commands to manage assistant m
 | `/voice [seconds]` | Toggle 2-Way Voice Mode, with optional mic wait window (aliases: `/mic`, `/talk`) |
 | `/stop` | Disable Voice Mode and return to keyboard typing (alias: `/pause`) |
 | `/tools` | List all active agent tools |
-| `/skills` | Display active Google Agent Skills (`google/skills`) |
+| `/skills` | Display cached Agent Skills |
 | `/mcp` | Register, list, or remove MCP server configurations (experimental) |
 | `/history` | Display conversation transcript (200-char preview per message) |
 | `/clear` | Reset conversation state and clear history |
@@ -160,7 +160,7 @@ Inside the `gemma4-agent` REPL session, use slash commands to manage assistant m
 | `python_eval` | `code` | Execute Python code snippet and return STDOUT/STDERR |
 | `web_fetch` | `url` | Fetch plain text content from web URLs |
 | `web_search` | `query` | Privacy-preserving web search |
-| `fetch_google_skill` | `skill_name` | Fetch official Google Cloud skills from `google/skills` |
+| `fetch_skill` | `skill_name`, `source` (optional) | Fetch an Agent Skill from `google/skills` (default) or any GitHub `owner/repo` with `SKILL.md` files |
 | `take_screenshot` | `filename` | Capture desktop screenshot to a file (`mss`, cross-platform; macOS fallback); reference the saved path in a follow-up prompt for vision analysis |
 | `ripgrep_search` | `query`, `path` | High-speed regex code search across files |
 
@@ -173,7 +173,7 @@ Inside the `gemma4-agent` REPL session, use slash commands to manage assistant m
 1. ⚡ **Interactive Terminal REPL (`gemma_agent/cli.py` & `ui.py`)**: Handles prompt input, slash commands (`/voice`, `/tools`, `/mcp`), rich ANSI/HTML color rendering, markdown tables, and hands-free microphone/speech synthesis.
 2. 🧠 **Agent Orchestrator (`gemma_agent/agent.py`)**: Manages conversation history, `<think>...</think>` step-by-step reasoning extraction, multi-turn tool calling loops, tool call deduplication, self-healing error recovery, and performance telemetry.
 3. 🦙 **Local Model Backend (`gemma_agent/backends.py`)**: Communicates with the local **Ollama** LLM engine via REST API, automatically converts local image file paths to Base64 vision frames, and tracks token consumption metrics.
-4. 🛠️ **Tools & Skills Engine (`gemma_agent/tools.py`, `skills.py`, `mcp.py`)**: Provides 10 native tools (`bash_run`, `python_eval`, `take_screenshot`, `ripgrep_search`), fetches official Google Agent Skills on demand from [`google/skills`](https://github.com/google/skills), and keeps an experimental registry of Model Context Protocol (MCP) server configurations.
+4. 🛠️ **Tools & Skills Engine (`gemma_agent/tools.py`, `skills.py`, `mcp.py`)**: Provides 10 native tools (`bash_run`, `python_eval`, `take_screenshot`, `ripgrep_search`), fetches Agent Skills on demand — [`google/skills`](https://github.com/google/skills) by default plus any community `SKILL.md` repo from the [skills.sh](https://skills.sh) ecosystem — and keeps an experimental registry of Model Context Protocol (MCP) server configurations.
 
 ```mermaid
 %%{init: {'theme': 'neutral'}}%%
@@ -195,7 +195,7 @@ graph TD
     subgraph NET["🌐 External Services"]
         DDG["DuckDuckGo (web_search)"]
         Web["Fetched URLs (web_fetch)"]
-        GitHub["google/skills via GitHub API (fetch_google_skill)"]
+        GitHub["GitHub skill repos (fetch_skill — google/skills + community)"]
     end
     Registry -. "opt-in" .-> DDG
     Registry -. "opt-in" .-> Web
@@ -236,6 +236,7 @@ Contributions, bug reports, and feature requests are welcome!
 - 🧠 **Google DeepMind Gemma**: [Official Google DeepMind Gemma Open Models](https://deepmind.google/technologies/gemma/)
 - 📦 **Google DeepMind GitHub**: [google-deepmind/gemma Repository](https://github.com/google-deepmind/gemma)
 - 🌐 **Google Agent Skills**: [google/skills Repository](https://github.com/google/skills)
+- 🧩 **Agent Skills Ecosystem**: [skills.sh Directory](https://skills.sh) · [vercel-labs/skills CLI](https://github.com/vercel-labs/skills)
 - 🦙 **Ollama Model Library**: [Ollama Gemma 4 Models](https://ollama.com/library/gemma4)
 
 ---

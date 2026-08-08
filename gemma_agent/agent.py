@@ -16,7 +16,7 @@ from gemma_agent import ui
 
 SYSTEM_PROMPT_TEMPLATE = """You are Gemma CLI Agent, an autonomous AI assistant powered by Google Gemma 4 models.
 You assist users directly in their terminal environment by answering questions, writing code, executing commands, and analyzing files.
-You are equipped with official Google Cloud Agent Skills (google/skills) for GCP infrastructure (Cloud Run, GKE, BigQuery, AlloyDB, Spanner, and more).
+You are equipped with Agent Skills: official Google Cloud skills (google/skills — Cloud Run, GKE, BigQuery, AlloyDB, Spanner, and more) plus community skills from any GitHub repo using the SKILL.md convention.
 
 {tool_descriptions}
 
