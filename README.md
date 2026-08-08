@@ -140,7 +140,7 @@ Inside the `gemma4-agent` REPL session, use slash commands to manage assistant m
 | `/voice [seconds]` | Toggle 2-Way Voice Mode, with optional mic wait window (aliases: `/mic`, `/talk`) |
 | `/stop` | Disable Voice Mode and return to keyboard typing (alias: `/pause`) |
 | `/tools` | List all active agent tools |
-| `/skills` | Display cached Agent Skills |
+| `/skills` | Display cached Agent Skills (`/skills clear` resets the cache) |
 | `/mcp` | Register, list, or remove MCP server configurations (experimental) |
 | `/history` | Display conversation transcript (200-char preview per message) |
 | `/clear` | Reset conversation state and clear history |

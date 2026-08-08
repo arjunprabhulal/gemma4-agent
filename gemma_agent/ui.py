@@ -236,7 +236,7 @@ def print_help():
     table.add_row("/help", "Show this help message")
     table.add_row("/clear", "Clear session conversation history")
     table.add_row("/tools", "List all active agent tools")
-    table.add_row("/skills", "List cached Agent Skills (google/skills + community repos)")
+    table.add_row("/skills", "List cached Agent Skills; '/skills clear' resets the cache")
     table.add_row("/mcp", "Register/list/remove MCP server configs (experimental)")
     table.add_row("/history", "Display conversation transcript")
     table.add_row(escape("/voice [seconds]"), "Toggle 2-Way Voice Mode; optional speech-wait window (aliases: /mic, /talk)")

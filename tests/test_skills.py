@@ -114,6 +114,40 @@ class TestSkillFetching(unittest.TestCase):
             # A same-named skill in the default source would use a different file
             self.assertFalse(os.path.exists(os.path.join(td, "nextjs.md")))
 
+    def test_poisoned_legacy_cache_is_discarded_and_refetched(self):
+        """A pre-validation cache file holding the WRONG skill must never be served."""
+        with tempfile.TemporaryDirectory() as td:
+            with open(os.path.join(td, "gke-basics.md"), "w", encoding="utf-8") as f:
+                f.write("name: alloydb-basics\nWRONG LEGACY CONTENT")
+            res = self._fetch("gke-basics", td)
+            self.assertIn("CONTENT-OF-gke-basics", res)
+            self.assertNotIn("WRONG LEGACY CONTENT", res)
+            # The refreshed cache now carries the validation marker
+            with open(os.path.join(td, "gke-basics.md"), encoding="utf-8") as f:
+                self.assertIn("gemma4-agent skill-cache", f.readline())
+
+    def test_valid_cache_marker_round_trip(self):
+        """A marker-validated cache entry is served without hitting the network."""
+        with tempfile.TemporaryDirectory() as td:
+            self._fetch("gke basics", td)
+            sm = SkillManager(cache_dir=td)
+            with patch("gemma_agent.skills.requests.get",
+                       side_effect=AssertionError("network must not be hit on cache hit")):
+                res = sm.search_and_fetch_github_skill("gke-basics")
+            self.assertIn("Cached Skill", res)
+            self.assertIn("CONTENT-OF-gke-basics", res)
+            self.assertNotIn("skill-cache", res)  # marker stripped from output
+
+    def test_clear_cache(self):
+        import glob as glob_mod
+        with tempfile.TemporaryDirectory() as td:
+            self._fetch("gke basics", td)
+            sm = SkillManager(cache_dir=td)
+            removed = sm.clear_cache()
+            self.assertGreaterEqual(removed, 1)
+            self.assertEqual(glob_mod.glob(os.path.join(td, "*.md")), [])
+            self.assertEqual(sm.skills, {})
+
     def test_no_match_lists_available(self):
         with tempfile.TemporaryDirectory() as td:
             res = self._fetch("zzz-nonexistent", td)

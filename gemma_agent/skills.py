@@ -57,15 +57,41 @@ class SkillManager:
             return f"{skill}.md"
         return f"{source.replace('/', '--')}--{skill}.md"
 
+    @staticmethod
+    def _cache_marker(source: str, skill: str) -> str:
+        return f"<!-- gemma4-agent skill-cache source={source} skill={skill} -->"
+
     def _read_cache(self, source: str, skill: str) -> Optional[str]:
+        """Return cached content only if its embedded marker proves it is the
+        right skill from the right source. Unmarked/mismatched files (including
+        anything written by older versions with the wrong-match bug) are
+        deleted so the next fetch replaces them with verified content."""
         path = os.path.join(self.cache_dir, self._cache_filename(source, skill))
-        if os.path.exists(path):
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                first = f.readline().rstrip("\n")
+                rest = f.read()
+            if first == self._cache_marker(source, skill):
+                return rest
+            os.remove(path)  # stale/poisoned entry — force a fresh fetch
+        except Exception:
+            pass
+        return None
+
+    def clear_cache(self) -> int:
+        """Delete all cached skill files and reset the in-memory index."""
+        removed = 0
+        for filepath in glob.glob(os.path.join(self.cache_dir, "*.md")):
             try:
-                with open(path, "r", encoding="utf-8") as f:
-                    return f.read()
+                os.remove(filepath)
+                removed += 1
             except Exception:
                 pass
-        return None
+        self.skills = {}
+        self.load_local_skills()
+        return removed
 
     @staticmethod
     def _rank_match(query_slug: str, names) -> Optional[str]:
@@ -148,11 +174,12 @@ class SkillManager:
                 return f"Found skill '{matched}' in {source} but could not download it (HTTP {r_resp.status_code})."
             content = r_resp.text
 
-            # Save to local cache for fast offline access next time
+            # Save to local cache for fast offline access next time, with a
+            # marker header so reads can verify it is the right skill.
             try:
                 cache_path = os.path.join(self.cache_dir, self._cache_filename(source, matched))
                 with open(cache_path, "w", encoding="utf-8") as f:
-                    f.write(content)
+                    f.write(self._cache_marker(source, matched) + "\n" + content)
                 self.skills[matched] = {
                     "name": matched.replace("-", " ").title(),
                     "description": f"Fetched from {source} ({matched})"

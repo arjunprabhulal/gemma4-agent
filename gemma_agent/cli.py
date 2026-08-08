@@ -143,6 +143,10 @@ def main():
                         ui.print_info(f"Current model: '{agent.backend.model_name}' — usage: /model <tag> (e.g. /model gemma4:12b)")
                     continue
                 elif cmd == "/skills":
+                    if len(cmd_parts) > 1 and cmd_parts[1].lower() == "clear":
+                        removed = agent.skill_manager.clear_cache()
+                        ui.print_success(f"Skill cache cleared ({removed} file(s) removed). Skills will re-fetch fresh on demand.")
+                        continue
                     skills_text = "### ☁️ Active Agent Skills\n\n"
                     if agent.skill_manager.skills:
                         for s_id, s_info in agent.skill_manager.skills.items():
