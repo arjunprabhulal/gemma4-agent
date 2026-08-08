@@ -47,7 +47,7 @@ GROUNDING_TRIGGERS = (
     "a2a", "agent2agent", "agent engine", "rag engine",
     "gemma 4", "gemma4", "gemini 3", "gemini agents api",
     "mcp server", "mcp tool", "model context protocol",
-    "skills.sh", "agent skills",
+    "skills.sh", "agent skill", "agents skill", "skill.md",
 )
 
 GROUNDING_NOTE = (
