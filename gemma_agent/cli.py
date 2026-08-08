@@ -39,8 +39,19 @@ def main():
         type=str,
         help="Run a single user query non-interactively and exit."
     )
+    parser.add_argument(
+        "--setup-voice",
+        action="store_true",
+        help="Download and cache the local voice transcription model (~74MB, one-time), then exit."
+    )
 
     args = parser.parse_args()
+
+    # One-time setup: fetch the local voice model, like `ollama pull` for speech
+    if args.setup_voice:
+        from gemma_agent.voice_input import ensure_voice_model
+        ensure_voice_model()
+        return
 
     model_name = args.model or "gemma4:26b"
     backend = LocalGemmaBackend(model_name=model_name, host=args.host)
@@ -62,6 +73,8 @@ def main():
 
     if voice_mode:
         ui.print_success("🎙️🔊 2-Way Voice Assistant Mode is ENABLED (Mic Input + Spoken Speaker Output).")
+        from gemma_agent.voice_input import ensure_voice_model
+        ensure_voice_model()
 
     # Check connection to local backend
     connected, msg = backend.check_connection()
@@ -112,6 +125,9 @@ def main():
                         mic_duration = max(1, int(cmd_parts[1]))  # 0 would cancel the mic instantly
                     status_str = f"ENABLED 🎙️🔊 ({mic_duration}s speech-wait window)" if voice_mode else "DISABLED 🔇"
                     ui.print_success(f"Voice Assistant Mode is now {status_str}")
+                    if voice_mode:
+                        from gemma_agent.voice_input import ensure_voice_model
+                        ensure_voice_model()
                     continue
                 elif cmd in ["/stop", "/pause"]:
                     voice_mode = False

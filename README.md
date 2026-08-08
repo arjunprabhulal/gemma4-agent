@@ -29,7 +29,7 @@
 - 🔒 **100% Private & Local-First**: Runs fully on your hardware via local Ollama inference (`http://localhost:11434`). Zero cloud logging, zero telemetry tracking, and zero API costs.
 - ⚡ **Interactive Lightning REPL**: Features a terminal interface powered by `prompt_toolkit` and `rich`, complete with command history, syntax-highlighted code previews, and live slash commands.
 - 👁️ **Multimodal Vision Integration**: Include a local image file path (`.png`, `.jpg`, `.webp`) in your prompt and it is auto-detected and fed as base64 frames directly to local Gemma vision models.
-- 🎙️🔊 **2-Way Hands-Free Voice Assistant Mode**: Toggle full voice assistant mode (`/voice`) to speak instructions via microphone and hear agent answers via spoken speaker output.
+- 🎙️🔊 **2-Way Hands-Free Voice Assistant Mode**: Toggle full voice assistant mode (`/voice`) to speak instructions via microphone and hear agent answers via spoken speaker output. Transcription runs on-device with [Whisper](https://github.com/openai/whisper) via the fast [faster-whisper](https://github.com/SYSTRAN/faster-whisper) implementation — your voice never leaves the machine. (Fetch the ~74MB model during setup with `gemma4-agent --setup-voice`; otherwise it downloads automatically when you first enable voice mode.)
 - 🛠️ **10 Native Built-in Agent Tools**:
   - `bash_run`: Local shell command execution.
   - `read_file` & `write_file`: File inspection and creation.
@@ -53,7 +53,7 @@
 | **Language** | Core Runtime | **Python 3.10+** | Agent execution loop, tool invocation, and CLI parser |
 | **AI Backend** | LLM Inference | **Ollama** | Local 100% private engine for **Google DeepMind Gemma 4** models |
 | **UI & REPL** | Terminal Interface | **`prompt_toolkit` & `rich`** | History REPL, HTML/ANSI formatting, markdown panels, and tables |
-| **Audio & Speech** | 2-Way Voice Mode | **`sounddevice` & `SpeechRecognition` (offline PocketSphinx)** | Fully local microphone transcription with pause detection & native speech output |
+| **Audio & Speech** | 2-Way Voice Mode | **`sounddevice` & `SpeechRecognition` + local Whisper (`faster-whisper`)** | Fully local microphone transcription with pause detection & native speech output |
 | **Multimodal Vision** | Screenshot Tool | **`mss` (Python Screen Capture)** | Local desktop frame capture for Gemma vision model analysis |
 | **Code Search** | Fast Repository Search | **`ripgrep` (`rg`)** | Lightning-fast regex code search across project directories |
 | **Cloud Skills** | Skill Repository | **GitHub REST API** | Dynamic on-demand skills fetching from [`google/skills`](https://github.com/google/skills) |
@@ -99,13 +99,21 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-### 3. Launch the Interactive REPL
+### 3. Download the Local Voice Model (one-time, like `ollama pull`)
+
+```bash
+gemma4-agent --setup-voice   # caches the ~74MB Whisper model for offline voice mode
+```
+
+(Optional — if you skip it, the model downloads automatically the first time you enable `/voice`.)
+
+### 4. Launch the Interactive REPL
 
 ```bash
 gemma4-agent   # aliases: gemma-agent, gemma4
 ```
 
-### 4. Custom Model Options
+### 5. Custom Model Options
 
 ```bash
 # Run with specific local Gemma tag
@@ -113,7 +121,7 @@ gemma4-agent --model gemma4:26b
 gemma4-agent --model gemma4:12b
 ```
 
-### 5. Single Execution Mode (`-e`)
+### 6. Single Execution Mode (`-e`)
 
 ```bash
 # Non-interactive single query execution
@@ -172,7 +180,7 @@ Inside the `gemma4-agent` REPL session, use slash commands to manage assistant m
 graph TD
     subgraph LOCAL["⚡ Gemma4 Agent — 100% Local & Private"]
         User["⌨️ Terminal User"] --> CLI["cli.py — Lightning REPL"]
-        Mic["🎙️ Microphone"] --> Voice["voice_input.py — VAD + offline PocketSphinx STT"]
+        Mic["🎙️ Microphone"] --> Voice["voice_input.py — VAD + local Whisper STT (faster-whisper)"]
         Voice --> CLI
         CLI --> Agent["agent.py — GemmaAgent Orchestrator"]
         Agent <--> Backend["backends.py — LocalGemmaBackend"]

@@ -2,7 +2,7 @@
 Gemma Agent Voice Input Module.
 
 Provides smart microphone recording with Voice Activity Detection (VAD)
-and fully local speech-to-text recognition (PocketSphinx).
+and fully local speech-to-text recognition (Whisper via faster-whisper).
 """
 
 import tempfile
@@ -14,9 +14,53 @@ from typing import Optional
 from gemma_agent import ui
 
 
+_WHISPER_MODEL = "base.en"
+
+
 def _energy(data) -> float:
     """Mean absolute amplitude, computed in int32 so int16's -32768 cannot overflow."""
     return float(np.abs(data.astype(np.int32)).mean())
+
+
+def ensure_voice_model() -> bool:
+    """Download/cache the local Whisper model ahead of first use.
+
+    Called when voice mode is enabled so the one-time ~74MB download happens
+    up front with a visible message, instead of silently stalling the first
+    listen. No-op (fast) when the model is already cached.
+    """
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError:
+        ui.print_error("Local speech engine missing. Run: pip install faster-whisper")
+        return False
+    try:
+        ui.print_info("🎙️  Preparing local speech model (one-time ~74MB download if not already cached)...")
+        WhisperModel(_WHISPER_MODEL, device="cpu", compute_type="int8")
+        ui.print_success("Local speech model ready — transcription runs fully on-device.")
+        return True
+    except Exception as e:
+        ui.print_error(f"Could not prepare the speech model: {e}")
+        ui.print_info("Voice input will retry the download on first use.")
+        return False
+
+
+def _transcribe(recognizer, audio_data, sr_module) -> Optional[str]:
+    """Transcribe on-device with local Whisper (faster-whisper implementation).
+
+    The recording never leaves the machine. First use downloads the base.en
+    model (~74MB) from Hugging Face once; every run after that is fully offline.
+    """
+    try:
+        return recognizer.recognize_faster_whisper(audio_data, model=_WHISPER_MODEL)
+    except sr_module.UnknownValueError:
+        return None  # audio was unintelligible
+    except ImportError:
+        ui.print_error("Local speech engine missing. Run: pip install faster-whisper")
+        return None
+    except Exception as e:
+        ui.print_error(f"Local transcription failed: {e}")
+        return None
 
 
 def listen_to_microphone(
@@ -33,8 +77,8 @@ def listen_to_microphone(
        If nothing is heard, cancels cleanly and returns None.
     2. Once speech starts, records until `pause_threshold` seconds of silence
        or `max_phrase_limit` seconds total.
-    3. Transcribes locally via PocketSphinx; the recording never leaves the
-       machine and the temp WAV is always deleted.
+    3. Transcribes locally via Whisper (faster-whisper); the recording never
+       leaves the machine and the temp WAV is always deleted.
     """
     if duration is not None:
         silence_timeout = float(duration)
@@ -112,21 +156,12 @@ def listen_to_microphone(
             wf.setframerate(sample_rate)
             wf.writeframes(b''.join(frames))
 
-        # Transcribe speech
+        # Transcribe speech — 100% local either way (no audio leaves the machine)
         recognizer = sr.Recognizer()
         with sr.AudioFile(wav_path) as source:
             audio_data = recognizer.record(source)
-        try:
-            # 100% local offline transcription via PocketSphinx (no audio leaves the machine)
-            text = recognizer.recognize_sphinx(audio_data)
-            return text.strip()
-        except sr.UnknownValueError:
-            return None
-        except sr.RequestError:
-            ui.print_error("Local speech engine is not installed. Run: pip install pocketsphinx")
-            return None
-        except Exception:
-            return None
+        text = _transcribe(recognizer, audio_data, sr)
+        return text.strip() if text else None
 
     except Exception as e:
         ui.print_error(f"Voice recording error: {str(e)}")
