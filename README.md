@@ -67,11 +67,17 @@
 
 Before installing `gemma4-agent`, ensure you have:
 
-1. **Python 3.10+** installed on macOS or Linux. (Note: spoken speech output and the screenshot fallback use macOS-native tools; on Linux, voice input and `mss` screenshots work, but speaker output is unavailable.)
+1. **Python 3.10+** installed on macOS or Linux. On Windows, use [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) and follow the Linux steps. (Note: spoken speech output and the screenshot fallback use macOS-native tools; on Linux/WSL2, voice input and `mss` screenshots work, but speaker output is unavailable.)
 2. **Ollama** installed and running locally:
 
    ```bash
-   # Download and start Ollama
+   # macOS
+   brew install ollama
+   # Linux / WSL2
+   curl -fsSL https://ollama.com/install.sh | sh
+   # Windows (native): installer from https://ollama.com/download
+
+   # Start the server
    ollama serve
    ```
 
