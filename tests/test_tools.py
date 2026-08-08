@@ -28,6 +28,74 @@ class TestToolRegistry(unittest.TestCase):
         for t in expected_tools:
             self.assertIn(t, tool_names)
 
+    def test_confirmation_gate_blocks_and_allows(self):
+        """Denied approvals cancel system tools with a model-readable message;
+        approvals run; read-only tools never prompt."""
+        calls = []
+        tools = ToolRegistry()
+        tools.confirm_callback = lambda name, args: calls.append(name) or False
+        res = tools.execute("bash_run", {"command": "echo hi"})
+        self.assertIn("Cancelled by user", res)
+        self.assertEqual(calls, ["bash_run"])
+
+        tools.confirm_callback = lambda name, args: True
+        res = tools.execute("bash_run", {"command": "echo approved"})
+        self.assertIn("approved", res)
+
+        # Read-only tools bypass the gate entirely
+        tools.confirm_callback = lambda name, args: (_ for _ in ()).throw(AssertionError("must not prompt"))
+        res = tools.execute("list_directory", {"directory_path": "."})
+        self.assertNotIn("Cancelled", res)
+
+    def test_bash_output_is_truncated(self):
+        """A single command cannot blow out the model context."""
+        tools = ToolRegistry()
+        res = tools.execute("bash_run", {"command": "python3 -c \"print('x' * 50000)\""})
+        self.assertLess(len(res), 12000)
+        self.assertIn("truncated", res)
+
+    def test_read_file_is_truncated(self):
+        import tempfile
+        tools = ToolRegistry()
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write("y" * 50000)
+            path = f.name
+        try:
+            res = tools.execute("read_file", {"filepath": path})
+            self.assertLess(len(res), 15000)
+            self.assertIn("truncated", res)
+        finally:
+            os.remove(path)
+
+    def test_ripgrep_fallback_output_is_capped(self):
+        """The Python fallback (used when rg isn't a PATH binary) must obey the
+        same cap as the rg path — an attacker demonstrated a 3MB return."""
+        import tempfile
+        from unittest.mock import patch
+        tools = ToolRegistry()
+        d = tempfile.mkdtemp()
+        with open(os.path.join(d, "huge.txt"), "w") as f:
+            f.write("needle " + "x" * 3_000_000 + "\n")          # one 3MB line
+            for _ in range(30):
+                f.write("needle " + "y" * 5000 + "\n")            # many long lines
+        with patch("gemma_agent.tools.subprocess.run", side_effect=FileNotFoundError):
+            res = tools.execute("ripgrep_search", {"query": "needle", "path": d})
+        self.assertLess(len(res), 4000)                            # bounded (was 3MB)
+        for line in res.splitlines():
+            self.assertLess(len(line), 350)                        # per-line cap
+        self.assertIn("truncated", res)                            # total cap notice
+
+    def test_list_directory_output_size_capped(self):
+        """300 long-named entries must not exceed the byte cap."""
+        import tempfile
+        tools = ToolRegistry()
+        d = tempfile.mkdtemp()
+        for i in range(300):
+            open(os.path.join(d, f"{i:03d}_" + "n" * 200 + ".txt"), "w").close()
+        res = tools.execute("list_directory", {"directory_path": d})
+        self.assertLess(len(res), 9000)
+        self.assertIn("truncated", res)
+
     def test_execute_coerces_string_arguments(self):
         """Models often emit arguments as a JSON string; it must still run."""
         tools = ToolRegistry()

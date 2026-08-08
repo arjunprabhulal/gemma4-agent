@@ -161,6 +161,34 @@ class TestGemmaAgent(unittest.TestCase):
             agent._parse_json_tool_calls(bare),
             [{"name": "list_directory", "arguments": {}}],
         )
+        # Bare JSON wrapped in conversational prose (LLMs do this constantly)
+        prose = 'Sure, here is the call: {"tool": "bash_run", "arguments": {"command": "ls"}} — done!'
+        self.assertEqual(
+            agent._parse_json_tool_calls(prose),
+            [{"name": "bash_run", "arguments": {"command": "ls"}}],
+        )
+        # Prose containing stray brace groups around the real call
+        braces = 'Per the {tool} spec: {"tool": "read_file", "arguments": {"filepath": "x"}} per {schema}.'
+        self.assertEqual(
+            agent._parse_json_tool_calls(braces),
+            [{"name": "read_file", "arguments": {"filepath": "x"}}],
+        )
+        # Two bare call objects in one response — both must survive
+        two = 'First {"tool": "read_file", "arguments": {"filepath": "a"}} then {"tool": "list_directory", "arguments": {}} ok'
+        self.assertEqual(len(agent._parse_json_tool_calls(two)), 2)
+        # A malformed fence must not poison a later valid fence
+        fences = '```json\n{"tool": "read_file",\n```\nretrying:\n```json\n{"tool": "list_directory", "arguments": {}}\n```'
+        self.assertEqual(
+            agent._parse_json_tool_calls(fences),
+            [{"name": "list_directory", "arguments": {}}],
+        )
+        # Bare top-level array of calls
+        arr = '[{"tool": "read_file", "arguments": {"filepath": "a"}}, {"tool": "list_directory", "arguments": {}}]'
+        self.assertEqual(len(agent._parse_json_tool_calls(arr)), 2)
+        # Raw newline inside an argument string (strict=False recovery)
+        nl = '```json\n{"tool": "write_file", "arguments": {"filepath": "f", "content": "line1\nline2"}}\n```'
+        parsed = agent._parse_json_tool_calls(nl)
+        self.assertEqual(parsed[0]["arguments"]["content"], "line1\nline2")
         self.assertIsNone(agent._parse_json_tool_calls("no tools mentioned here"))
         self.assertIsNone(agent._parse_json_tool_calls('```json\n{"not_a_tool": 1}\n```'))
         self.assertIsNone(agent._parse_json_tool_calls(""))

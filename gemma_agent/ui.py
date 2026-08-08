@@ -257,6 +257,7 @@ def print_help():
     table.add_row("/stop", "Disable Voice Assistant mode and return to typing (alias: /pause)")
     table.add_row(escape("/think [on|off]"), "Toggle step-by-step reasoning mode (off = faster direct answers)")
     table.add_row(escape("/ground [on|off]"), "Toggle automatic web-grounding for post-cutoff topics")
+    table.add_row(escape("/confirm [on|off]"), "Toggle approval prompts for bash_run/python_eval/write_file")
     table.add_row("/model <tag>", "Switch active local Gemma model tag on the fly (alias: /backend)")
     table.add_row("/exit or /quit", "Exit the agent CLI")
     console.print(table)

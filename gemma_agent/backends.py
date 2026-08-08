@@ -6,6 +6,7 @@ local Ollama instances (LocalGemmaBackend).
 """
 
 import os
+import re
 import json
 import time
 import base64
@@ -67,11 +68,20 @@ def _extract_image_paths(content: str) -> Tuple[str, List[str]]:
         Tuple[str, List[str]]: (Original text, list of attachable image paths).
     """
     image_paths = []
+
+    def _consider(candidate: str) -> None:
+        # Strip quotes and trailing sentence punctuation ("see a.png," / "(a.png)")
+        path = os.path.expanduser(candidate.strip("\"'").rstrip(".,;:!?)\"'"))
+        if (path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif'))
+                and os.path.isfile(path) and os.access(path, os.R_OK)
+                and path not in image_paths):
+            image_paths.append(path)
+
+    # Quoted paths first — the only way paths containing spaces can be detected
+    for m in re.finditer(r"""["']([^"'\n]+?\.(?:png|jpe?g|webp|bmp|gif))["']""", content, re.IGNORECASE):
+        _consider(m.group(1))
     for t in content.split():
-        clean_t = os.path.expanduser(t.strip("\"'"))
-        if (clean_t.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif'))
-                and os.path.isfile(clean_t) and os.access(clean_t, os.R_OK)):
-            image_paths.append(clean_t)
+        _consider(t)
     return content, image_paths
 
 
@@ -116,9 +126,13 @@ class LocalGemmaBackend(BaseBackend):
         messages: List[Dict[str, Any]],
         tools_schema: Optional[List[Dict[str, Any]]] = None,
         on_token=None,
+        think: Optional[bool] = None,
     ) -> Tuple[str, Optional[List[Dict[str, Any]]], Dict[str, Any]]:
         """Generate a completion. When on_token is provided, the request streams
-        and on_token(delta) is called for every content chunk as it arrives."""
+        and on_token(delta) is called for every content chunk as it arrives.
+        `think` maps to Ollama's native thinking mode for models that support
+        it (Gemma 4 does); native reasoning is returned wrapped in <think> tags
+        so the rest of the pipeline treats it uniformly."""
         url = f"{self.host}/api/chat"
         
         # Attach images for the most recent USER message wherever it sits in
@@ -175,6 +189,8 @@ class LocalGemmaBackend(BaseBackend):
         }
         if tools_schema:
             payload["tools"] = tools_schema
+        if think is not None:
+            payload["think"] = think
 
         start_time = time.time()
         try:
@@ -187,6 +203,9 @@ class LocalGemmaBackend(BaseBackend):
                 data = resp.json()
                 message = data.get("message", {})
                 content = message.get("content", "")
+                native_thinking = message.get("thinking") or ""
+                if native_thinking:
+                    content = f"<think>{native_thinking}</think>{content}"
 
                 tool_calls = None
                 if message.get("tool_calls"):
@@ -204,6 +223,7 @@ class LocalGemmaBackend(BaseBackend):
                 return f"Local Engine Error (HTTP {resp.status_code}): {resp.text}", None, {"duration_sec": elapsed, "backend_label": "Local Ollama"}
 
             content_parts: List[str] = []
+            thinking_parts: List[str] = []
             tool_calls_acc: List[Dict[str, Any]] = []
             final_chunk: Dict[str, Any] = {}
             for line in resp.iter_lines():
@@ -211,14 +231,18 @@ class LocalGemmaBackend(BaseBackend):
                     continue
                 try:
                     chunk = json.loads(line)
-                except Exception:
+                except ValueError:
                     continue
                 message = chunk.get("message", {})
+                think_delta = message.get("thinking") or ""
+                if think_delta:
+                    thinking_parts.append(think_delta)
                 delta = message.get("content", "")
                 if delta:
                     content_parts.append(delta)
+                if delta or think_delta:
                     try:
-                        on_token(delta)
+                        on_token(delta or think_delta)
                     except Exception:
                         pass  # display problems must never kill generation
                 for tc in message.get("tool_calls") or []:
@@ -228,7 +252,10 @@ class LocalGemmaBackend(BaseBackend):
                     final_chunk = chunk
 
             elapsed = time.time() - start_time
-            return "".join(content_parts), (tool_calls_acc or None), self._metrics(final_chunk, elapsed)
+            content = "".join(content_parts)
+            if thinking_parts:
+                content = f"<think>{''.join(thinking_parts)}</think>{content}"
+            return content, (tool_calls_acc or None), self._metrics(final_chunk, elapsed)
         except Exception as e:
             elapsed = time.time() - start_time
             return f"Error communicating with local Gemma engine: {str(e)}", None, {"duration_sec": elapsed, "backend_label": "Local Ollama"}

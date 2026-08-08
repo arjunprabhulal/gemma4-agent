@@ -47,13 +47,32 @@ def _validate_public_url(url: str):
         return False, str(e), None
 
 
+# Tools that can modify the system or execute arbitrary code — these require
+# user approval when a confirm callback is installed.
+CONFIRM_TOOLS = frozenset({"bash_run", "python_eval", "write_file"})
+
+
+def _truncate(text: str, limit: int, what: str) -> str:
+    """Cap tool output so a single command can't blow out the model's context."""
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"\n... [{what} truncated: {len(text) - limit} of {len(text)} chars omitted]"
+
+
 class ToolRegistry:
     """Registry and execution engine for Gemma CLI Agent tools."""
 
-    def __init__(self, skill_manager: Optional[Any] = None):
-        """Initialize ToolRegistry and register default tools."""
+    def __init__(self, skill_manager: Optional[Any] = None,
+                 confirm_callback: Optional[Callable[[str, Dict[str, Any]], bool]] = None):
+        """Initialize ToolRegistry and register default tools.
+
+        Args:
+            confirm_callback: When set, called as (tool_name, args) before any
+                CONFIRM_TOOLS execution; returning False cancels the call.
+        """
         self.tools: Dict[str, Dict[str, Any]] = {}
         self.skill_manager = skill_manager
+        self.confirm_callback = confirm_callback
         self.register_defaults()
 
     def register(self, name: str, description: str, parameters: Dict[str, Any], func: Callable) -> None:
@@ -96,6 +115,14 @@ class ToolRegistry:
                 kwargs = None
         if not isinstance(kwargs, dict):
             return f"Error: Tool '{name}' arguments must be a JSON object."
+        if name in CONFIRM_TOOLS and self.confirm_callback is not None:
+            try:
+                approved = self.confirm_callback(name, kwargs)
+            except Exception:
+                approved = False
+            if not approved:
+                return (f"Cancelled by user: the {name} call was not approved. "
+                        "Ask the user how to proceed or try a different approach.")
         try:
             return self.tools[name]["func"](**kwargs)
         except Exception as e:
@@ -291,8 +318,8 @@ class ToolRegistry:
                 timeout=60,
                 cwd=os.getcwd()
             )
-            out = res.stdout.strip()
-            err = res.stderr.strip()
+            out = _truncate(res.stdout.strip(), 6000, "stdout")
+            err = _truncate(res.stderr.strip(), 3000, "stderr")
             ret = f"Exit code: {res.returncode}\n"
             if out:
                 ret += f"STDOUT:\n{out}\n"
@@ -309,7 +336,7 @@ class ToolRegistry:
             if not os.path.exists(filepath):
                 return f"Error: File '{filepath}' does not exist."
             with open(filepath, "r", encoding="utf-8") as f:
-                return f.read()
+                return _truncate(f.read(), 12000, "file content (use ripgrep_search or bash_run to target sections)")
         except Exception as e:
             return f"Error reading file '{filepath}': {str(e)}"
 
@@ -326,14 +353,18 @@ class ToolRegistry:
         try:
             if not os.path.exists(directory_path):
                 return f"Error: Path '{directory_path}' does not exist."
-            items = os.listdir(directory_path)
+            items = sorted(os.listdir(directory_path))
             res = []
-            for item in sorted(items):
+            for item in items[:300]:
                 full_p = os.path.join(directory_path, item)
                 kind = "DIR " if os.path.isdir(full_p) else "FILE"
                 size = os.path.getsize(full_p) if os.path.isfile(full_p) else 0
                 res.append(f"[{kind}] {item} ({size} bytes)")
-            return "\n".join(res) if res else "(Empty directory)"
+            if len(items) > 300:
+                res.append(f"... [{len(items) - 300} more entries omitted]")
+            if not res:
+                return "(Empty directory)"
+            return _truncate("\n".join(res), 8000, "directory listing")
         except Exception as e:
             return f"Error listing directory '{directory_path}': {str(e)}"
 
@@ -346,8 +377,8 @@ class ToolRegistry:
                 timeout=30,
                 cwd=os.getcwd()
             )
-            out = res.stdout.strip()
-            err = res.stderr.strip()
+            out = _truncate(res.stdout.strip(), 6000, "stdout")
+            err = _truncate(res.stderr.strip(), 3000, "stderr")
             ret = f"Exit code: {res.returncode}\n"
             if out:
                 ret += f"STDOUT:\n{out}\n"
@@ -470,7 +501,7 @@ class ToolRegistry:
                         with open(fp, "r", encoding="utf-8", errors="ignore") as file_obj:
                             for idx, line in enumerate(file_obj, 1):
                                 if query.lower() in line.lower():
-                                    matches.append(f"{fp}:{idx}:{line.strip()}")
+                                    matches.append(f"{fp}:{idx}:{line.strip()[:200]}")
                                     if len(matches) >= 20:
                                         break
                     except Exception:
@@ -479,6 +510,8 @@ class ToolRegistry:
                         break
                 if len(matches) >= 20:
                     break
-            return "\n".join(matches) if matches else f"No matches found for pattern '{query}' in {search_path}."
+            if not matches:
+                return f"No matches found for pattern '{query}' in {search_path}."
+            return _truncate("\n".join(matches), 3000, "search results")
         except Exception as e:
             return f"Search error: {str(e)}"

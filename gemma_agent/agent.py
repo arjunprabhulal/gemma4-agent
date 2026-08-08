@@ -20,16 +20,16 @@ You answer questions, write code, run commands, and analyze files directly in th
 
 {tool_descriptions}
 
-{thinking_section}
-
 RULES:
 1. Use tools to act (run commands, read/write files, execute code). After a tool result arrives, do not repeat the identical call — use the result and answer.
 2. Answer from your own knowledge for things you know well. Use web_search or fetch_skill for information newer than your cutoff or when unsure of exact APIs — never invent imports, class names, or flags, and never write mock code unless asked.
 3. Be concise: short questions deserve short answers.
-4. Tool calls may also be written as a JSON block:
+4. Tool calls may also be written as a JSON block — escape quotes and newlines when arguments contain code or multiline text:
 ```json
 {{"tool": "tool_name", "arguments": {{"arg_name": "arg_value"}}}}
 ```
+
+{thinking_section}
 """
 
 THINKING_SECTION = """THINKING & REASONING MODE:
@@ -73,7 +73,7 @@ def _normalize_args(raw: Any) -> Dict[str, Any]:
             parsed = json.loads(raw)
             if isinstance(parsed, dict):
                 return parsed
-        except Exception:
+        except (TypeError, ValueError):
             pass
     return {}
 
@@ -164,22 +164,32 @@ class GemmaAgent:
         total_completion_tokens = 0
         last_backend_label = "Local Engine"
 
-        # Stream tokens live when the backend supports it (test stubs may not)
-        supports_stream = "on_token" in inspect.signature(self.backend.generate_response).parameters
+        # Detect optional backend capabilities (test stubs may support neither)
+        backend_params = inspect.signature(self.backend.generate_response).parameters
+        supports_stream = "on_token" in backend_params
+        extra_kwargs: Dict[str, Any] = {}
+        if "think" in backend_params:
+            extra_kwargs["think"] = self.thinking_enabled  # native Gemma 4 thinking mode
 
         for _ in range(max_iterations):
             if supports_stream:
-                accumulated: List[str] = []
                 with ui.streaming_live() as update_live:
+                    display_tail = ""
+
                     def _on_token(delta: str) -> None:
-                        accumulated.append(delta)
-                        update_live("".join(accumulated))
+                        nonlocal display_tail
+                        # Rolling tail keeps per-token display cost O(1) even
+                        # for very long (or multi-token-per-chunk) generations.
+                        display_tail = (display_tail + delta)[-1500:]
+                        update_live(display_tail)
                     content, tool_calls, metrics = self.backend.generate_response(
-                        self.history, tools_schema=tools_schema, on_token=_on_token
+                        self.history, tools_schema=tools_schema, on_token=_on_token, **extra_kwargs
                     )
             else:
                 with ui.console.status(f"[bold cyan]🧠 Generating response ({escape(self.backend.model_name)})...[/bold cyan]", spinner="dots"):
-                    content, tool_calls, metrics = self.backend.generate_response(self.history, tools_schema=tools_schema)
+                    content, tool_calls, metrics = self.backend.generate_response(
+                        self.history, tools_schema=tools_schema, **extra_kwargs
+                    )
             
             # Aggregate metrics
             total_turn_duration += metrics.get("duration_sec", 0.0)
@@ -217,7 +227,7 @@ class GemmaAgent:
                 t_name = tc.get("name") or tc.get("tool")
                 t_args = _normalize_args(tc.get("arguments") or tc.get("args") or {})
                 tc["arguments"] = t_args
-                sig = f"{t_name}:{json.dumps(t_args, sort_keys=True)}"
+                sig = f"{t_name}:{json.dumps(t_args, sort_keys=True, default=str)}"
                 if sig not in executed_signatures:
                     executed_signatures.add(sig)
                     unique_tool_calls.append(tc)
@@ -251,7 +261,7 @@ class GemmaAgent:
                 if is_err:
                     # A failed call must stay retryable, otherwise the model cannot
                     # re-run the same command after fixing the underlying problem.
-                    executed_signatures.discard(f"{tool_name}:{json.dumps(args, sort_keys=True)}")
+                    executed_signatures.discard(f"{tool_name}:{json.dumps(args, sort_keys=True, default=str)}")
                     ui.print_info("🔄 Self-Healing Loop Active: Error detected. Gemma 4 will auto-correct and re-run...")
 
                 # Append tool execution result back to conversation history
@@ -308,17 +318,12 @@ class GemmaAgent:
         if not text:
             return None
         
-        # Match fenced JSON blocks: ```json {...} ```, ```JSON, untagged ``` {...} ```,
-        # and top-level arrays of calls.
-        pattern = r"```(?:json)?\s*([\[{].*?[\]}])\s*```"
-        matches = re.findall(pattern, text, re.DOTALL | re.IGNORECASE)
+        tool_calls: List[Dict[str, Any]] = []
+        # strict=False tolerates raw newlines inside argument strings — a very
+        # common local-model emission when writing file content.
+        decoder = json.JSONDecoder(strict=False)
 
-        tool_calls = []
-        for raw_json in matches:
-            try:
-                data = json.loads(raw_json)
-            except Exception:
-                continue
+        def _collect(data: Any) -> None:
             items = data if isinstance(data, list) else [data]
             for item in items:
                 if isinstance(item, dict) and "tool" in item:
@@ -327,18 +332,36 @@ class GemmaAgent:
                         "arguments": _normalize_args(item.get("arguments", {}))
                     })
 
-        if not tool_calls:
-            # Fallback inline JSON match
+        # Fenced blocks: split on fence delimiters FIRST so one malformed fence
+        # cannot swallow later valid ones (a single regex spanning fences did).
+        for body in re.findall(r"```(.*?)```", text, re.DOTALL):
+            body = body.strip()
+            if body.lower().startswith("json"):
+                body = body[4:].lstrip()
+            if not body or body[0] not in "[{":
+                continue
             try:
-                if '"tool":' in text:
-                    data = json.loads(text.strip())
-                    if isinstance(data, dict) and "tool" in data:
-                        tool_calls.append({
-                            "name": data["tool"],
-                            "arguments": _normalize_args(data.get("arguments", {}))
-                        })
-            except Exception:
-                pass
+                data, _ = decoder.raw_decode(body)
+                _collect(data)
+            except ValueError:
+                continue
+
+        if not tool_calls and '"tool"' in text:
+            # Bare JSON possibly wrapped in prose containing stray braces:
+            # attempt a decode at every '[' / '{' opening position, skipping
+            # past each successfully-consumed span.
+            idx = 0
+            while idx < len(text):
+                if text[idx] in "[{":
+                    try:
+                        data, consumed = decoder.raw_decode(text[idx:])
+                    except ValueError:
+                        idx += 1
+                        continue
+                    _collect(data)
+                    idx += max(consumed, 1)
+                else:
+                    idx += 1
 
         return tool_calls if tool_calls else None
 
