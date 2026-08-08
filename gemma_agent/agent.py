@@ -7,6 +7,7 @@ and telemetry tracking for the Google Gemma 4 CLI Agent.
 
 import re
 import json
+import inspect
 from typing import List, Dict, Any, Optional, Tuple
 from rich.markup import escape
 from gemma_agent.backends import BaseBackend
@@ -14,30 +15,48 @@ from gemma_agent.tools import ToolRegistry
 from gemma_agent.skills import SkillManager
 from gemma_agent import ui
 
-SYSTEM_PROMPT_TEMPLATE = """You are Gemma CLI Agent, an autonomous AI assistant powered by Google Gemma 4 models.
-You assist users directly in their terminal environment by answering questions, writing code, executing commands, and analyzing files.
-You are equipped with Agent Skills: official Google Cloud skills (google/skills — Cloud Run, GKE, BigQuery, AlloyDB, Spanner, and more) plus community skills from any GitHub repo using the SKILL.md convention.
+SYSTEM_PROMPT_TEMPLATE = """You are Gemma CLI Agent, an autonomous terminal assistant powered by Google Gemma 4 (knowledge cutoff: January 2025).
+You answer questions, write code, run commands, and analyze files directly in the user's terminal.
 
 {tool_descriptions}
 
-THINKING & REASONING MODE:
-1. Before answering or executing tools, wrap your step-by-step reasoning inside `<think>...</think>` tags.
-2. Explain your plan, why you chose specific tools, and what actions you are taking.
+{thinking_section}
 
-CRITICAL RULES FOR TOOL EXECUTION:
-1. When you need to perform an action (read files, run bash commands, write code, run python snippets), call a tool!
-2. Once a tool has been executed and you receive its result, DO NOT call the exact same tool with the exact same parameters again.
-3. After the tool succeeds, summarize the result and provide your final response to the user.
-4. You can call tools using native function calling OR by outputting a clean JSON block:
+RULES:
+1. Use tools to act (run commands, read/write files, execute code). After a tool result arrives, do not repeat the identical call — use the result and answer.
+2. Answer from your own knowledge for things you know well. Use web_search or fetch_skill for information newer than your cutoff or when unsure of exact APIs — never invent imports, class names, or flags, and never write mock code unless asked.
+3. Be concise: short questions deserve short answers.
+4. Tool calls may also be written as a JSON block:
 ```json
-{{
-  "tool": "tool_name",
-  "arguments": {{
-    "arg_name": "arg_value"
-  }}
-}}
+{{"tool": "tool_name", "arguments": {{"arg_name": "arg_value"}}}}
 ```
 """
+
+THINKING_SECTION = """THINKING & REASONING MODE:
+1. For multi-step tasks, coding, analysis, or anything involving tools, wrap your step-by-step reasoning inside `<think>...</think>` tags before acting — explain your plan and why you chose specific tools.
+2. For greetings, simple factual questions, and casual conversation, answer directly WITHOUT thinking tags — a short question deserves a fast answer."""
+
+NO_THINKING_SECTION = """THINKING MODE IS OFF:
+Do NOT use <think> tags or write out reasoning steps. Answer directly and concisely."""
+
+# Products/SDKs released or heavily changed after the model's January 2025
+# cutoff. A request mentioning these gets a per-turn grounding nudge — the
+# model cannot reliably know what it doesn't know, so the trigger is ours.
+GROUNDING_TRIGGERS = (
+    "adk", "agent development kit", "agents-cli", "agent starter pack",
+    "a2a", "agent2agent", "agent engine", "rag engine",
+    "gemma 4", "gemma4", "gemini 3", "gemini agents api",
+    "mcp server", "mcp tool", "model context protocol",
+    "skills.sh", "agent skills",
+)
+
+GROUNDING_NOTE = (
+    "System Note: This request involves a product or SDK released or changed after your "
+    "January 2025 knowledge cutoff — your training data about it is incomplete or absent. "
+    "NEVER claim such a product does not exist, and NEVER guess its APIs. Live web results "
+    "for this request are provided below: base your answer on them, and call fetch_skill "
+    "or web_search yourself if you need more detail."
+)
 
 
 def _normalize_args(raw: Any) -> Dict[str, Any]:
@@ -86,15 +105,31 @@ class GemmaAgent:
         self.tools = tool_registry or ToolRegistry(skill_manager=self.skill_manager)
         if not self.tools.skill_manager:
             self.tools.skill_manager = self.skill_manager
+        self.thinking_enabled = True
+        self.grounding_enabled = True
         self.history: List[Dict[str, Any]] = []
         self._init_system_prompt()
 
-    def _init_system_prompt(self) -> None:
-        """Construct system prompt including tool descriptions and registered skills."""
+    def _build_system_prompt(self) -> str:
         tool_desc = self.tools.get_system_prompt_tool_descriptions()
         skills_desc = self.skill_manager.get_all_skills_system_prompt()
-        sys_msg = SYSTEM_PROMPT_TEMPLATE.format(tool_descriptions=tool_desc) + skills_desc
-        self.history = [{"role": "system", "content": sys_msg}]
+        thinking = THINKING_SECTION if self.thinking_enabled else NO_THINKING_SECTION
+        return SYSTEM_PROMPT_TEMPLATE.format(
+            tool_descriptions=tool_desc, thinking_section=thinking
+        ) + skills_desc
+
+    def _init_system_prompt(self) -> None:
+        """Construct system prompt including tool descriptions and registered skills."""
+        self.history = [{"role": "system", "content": self._build_system_prompt()}]
+
+    def set_thinking(self, enabled: bool) -> None:
+        """Toggle reasoning mode, rebuilding the system prompt in place so the
+        current conversation is preserved."""
+        self.thinking_enabled = enabled
+        if self.history and self.history[0].get("role") == "system":
+            self.history[0]["content"] = self._build_system_prompt()
+        else:
+            self.history.insert(0, {"role": "system", "content": self._build_system_prompt()})
 
     def clear_history(self) -> None:
         """Reset conversation history back to initial system prompt."""
@@ -113,7 +148,14 @@ class GemmaAgent:
             str: Final response string from the assistant.
         """
         self.history.append({"role": "user", "content": user_input})
-        
+
+        # Forced grounding — even injected nudges proved unreliable under
+        # sampling: the model would skip searching or confidently deny that
+        # post-cutoff products exist. So the agent grounds FOR it, visibly.
+        lowered = user_input.lower()
+        if self.grounding_enabled and any(t in lowered for t in GROUNDING_TRIGGERS):
+            self._auto_ground(user_input)
+
         tools_schema = self.tools.get_schemas()
         executed_signatures = set()
         
@@ -122,10 +164,22 @@ class GemmaAgent:
         total_completion_tokens = 0
         last_backend_label = "Local Engine"
 
+        # Stream tokens live when the backend supports it (test stubs may not)
+        supports_stream = "on_token" in inspect.signature(self.backend.generate_response).parameters
+
         for _ in range(max_iterations):
-            # Request response from backend with animated spinner
-            with ui.console.status(f"[bold cyan]🧠 Generating response ({escape(self.backend.model_name)})...[/bold cyan]", spinner="dots"):
-                content, tool_calls, metrics = self.backend.generate_response(self.history, tools_schema=tools_schema)
+            if supports_stream:
+                accumulated: List[str] = []
+                with ui.streaming_live() as update_live:
+                    def _on_token(delta: str) -> None:
+                        accumulated.append(delta)
+                        update_live("".join(accumulated))
+                    content, tool_calls, metrics = self.backend.generate_response(
+                        self.history, tools_schema=tools_schema, on_token=_on_token
+                    )
+            else:
+                with ui.console.status(f"[bold cyan]🧠 Generating response ({escape(self.backend.model_name)})...[/bold cyan]", spinner="dots"):
+                    content, tool_calls, metrics = self.backend.generate_response(self.history, tools_schema=tools_schema)
             
             # Aggregate metrics
             total_turn_duration += metrics.get("duration_sec", 0.0)
@@ -219,6 +273,20 @@ class GemmaAgent:
             backend_label=last_backend_label
         )
         return limit_msg
+
+    def _auto_ground(self, user_input: str) -> None:
+        """Deterministically fetch live web context for post-cutoff topics and
+        inject it before the model's first response. Transparent (rendered like
+        any tool call) and toggleable via /ground."""
+        query = " ".join(user_input.split())[:120]
+        ui.print_info("🔎 Post-cutoff topic detected — grounding with live web results before answering (/ground off to disable)...")
+        ui.print_tool_call("web_search", {"query": query})
+        result = self.tools.execute("web_search", {"query": query})
+        ui.print_tool_result(result, is_error=result.startswith("Web search"))
+        self.history.append({
+            "role": "system",
+            "content": f"{GROUNDING_NOTE}\n\nLive web results:\n{result[:2500]}"
+        })
 
     def _strip_dedup_notes(self) -> None:
         """Remove mid-turn dedup steering notes so they never leak into later turns."""

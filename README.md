@@ -19,7 +19,7 @@
 `gemma4-agent` is an open-source, local-first autonomous **multimodal** AI agent for terminal power users, developers, and researchers. Powered by **Google DeepMind's Gemma 4** open models running locally via **Ollama**, it lets you chat, execute terminal tasks, inspect codebases, run scripts, analyze images with Gemma 4's native vision, and talk hands-free (offline speech-to-text in, spoken answers out). **All AI inference and speech processing runs entirely on your machine — no cloud LLM APIs, no API keys, no telemetry.** The optional `web_search`, `web_fetch`, and `fetch_skill` tools access the internet only when explicitly invoked; skip them and the agent is fully offline.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/arjunprabhulal/gemma4-agent/main/assets/gemma-agent-cli.png?v=2" alt="gemma4-agent interactive REPL — startup banner and /help command list" width="900">
+  <img src="https://raw.githubusercontent.com/arjunprabhulal/gemma4-agent/main/assets/gemma-agent-cli.png?v=3" alt="gemma4-agent interactive REPL — startup banner and /help command list" width="900">
 </p>
 
 ---
@@ -42,6 +42,8 @@
 - 🌐 **Dynamic Agent Skills Integration**: On-demand download of skill docs injected into the agent's context — official Google Cloud skills (Cloud Run, GKE, BigQuery, AlloyDB, Spanner, and more) by default, plus community skills from any GitHub repo using the `SKILL.md` convention. Discover community skills with [`npx skills find`](https://skills.sh) and fetch them by `owner/repo`.
 - 🔌 **Model Context Protocol (MCP) Registry (Experimental)**: Register and list MCP server configurations (`/mcp`). Note: server processes are not yet spawned or queried — full MCP client support is on the roadmap.
 - 🧠 **Deep Reasoning Panels**: Displays `<think>...</think>` step-by-step internal planning before executing tool calls.
+- ⚡ **Live Token Streaming**: Watch responses generate token-by-token (like `ollama run`), with the final answer rendered as formatted markdown.
+- 🔎 **Automatic Grounding**: Prompts mentioning SDKs newer than the model's January 2025 cutoff (Google ADK, A2A, agents-cli, …) trigger a visible live web search first, so the model writes real APIs instead of guessing — toggle with `/ground`.
 - 📊 **Local Performance Metrics**: Per-turn latency and token consumption, rendered locally in your terminal — never transmitted anywhere.
 
 ---
@@ -144,6 +146,8 @@ Inside the `gemma4-agent` REPL session, use slash commands to manage assistant m
 | `/mcp` | Register, list, or remove MCP server configurations (experimental) |
 | `/history` | Display conversation transcript (200-char preview per message) |
 | `/clear` | Reset conversation state and clear history |
+| `/think [on\|off]` | Toggle step-by-step reasoning mode — off gives faster, direct answers |
+| `/ground [on\|off]` | Toggle automatic live web-grounding when prompts mention post-cutoff SDKs (ADK, A2A, …) |
 | `/model <tag>` | Switch active local Gemma model tag on the fly (e.g. `/model gemma4:12b`; alias: `/backend`) |
 | `/exit` or `/quit` | Exit `gemma4-agent` |
 

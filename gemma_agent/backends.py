@@ -102,11 +102,23 @@ class LocalGemmaBackend(BaseBackend):
         except Exception as e:
             return False, f"Could not connect to local Gemma engine at {self.host}: {str(e)}"
 
+    def _metrics(self, data: Dict[str, Any], elapsed: float) -> Dict[str, Any]:
+        total_duration_ns = data.get("total_duration", 0)
+        return {
+            "prompt_tokens": data.get("prompt_eval_count", 0),
+            "completion_tokens": data.get("eval_count", 0),
+            "duration_sec": (total_duration_ns / 1e9) if total_duration_ns > 0 else elapsed,
+            "backend_label": f"Local ({self.model_name})",
+        }
+
     def generate_response(
         self,
         messages: List[Dict[str, Any]],
-        tools_schema: Optional[List[Dict[str, Any]]] = None
+        tools_schema: Optional[List[Dict[str, Any]]] = None,
+        on_token=None,
     ) -> Tuple[str, Optional[List[Dict[str, Any]]], Dict[str, Any]]:
+        """Generate a completion. When on_token is provided, the request streams
+        and on_token(delta) is called for every content chunk as it arrives."""
         url = f"{self.host}/api/chat"
         
         # Attach images for the most recent USER message wherever it sits in
@@ -159,47 +171,64 @@ class LocalGemmaBackend(BaseBackend):
         payload = {
             "model": self.model_name,
             "messages": ollama_msgs,
-            "stream": False,
+            "stream": on_token is not None,
         }
         if tools_schema:
             payload["tools"] = tools_schema
 
         start_time = time.time()
         try:
-            resp = requests.post(url, json=payload, timeout=300)
-            elapsed = time.time() - start_time
+            if on_token is None:
+                resp = requests.post(url, json=payload, timeout=300)
+                elapsed = time.time() - start_time
+                if resp.status_code != 200:
+                    return f"Local Engine Error (HTTP {resp.status_code}): {resp.text}", None, {"duration_sec": elapsed, "backend_label": "Local Ollama"}
 
+                data = resp.json()
+                message = data.get("message", {})
+                content = message.get("content", "")
+
+                tool_calls = None
+                if message.get("tool_calls"):
+                    tool_calls = [
+                        {"name": tc.get("function", {}).get("name"),
+                         "arguments": tc.get("function", {}).get("arguments", {})}
+                        for tc in message["tool_calls"]
+                    ]
+                return content, tool_calls, self._metrics(data, elapsed)
+
+            # Streaming path: NDJSON chunks, one JSON object per line
+            resp = requests.post(url, json=payload, timeout=300, stream=True)
             if resp.status_code != 200:
+                elapsed = time.time() - start_time
                 return f"Local Engine Error (HTTP {resp.status_code}): {resp.text}", None, {"duration_sec": elapsed, "backend_label": "Local Ollama"}
-            
-            data = resp.json()
-            message = data.get("message", {})
-            content = message.get("content", "")
-            
-            tool_calls = None
-            if "tool_calls" in message and message["tool_calls"]:
-                tool_calls = []
-                for tc in message["tool_calls"]:
+
+            content_parts: List[str] = []
+            tool_calls_acc: List[Dict[str, Any]] = []
+            final_chunk: Dict[str, Any] = {}
+            for line in resp.iter_lines():
+                if not line:
+                    continue
+                try:
+                    chunk = json.loads(line)
+                except Exception:
+                    continue
+                message = chunk.get("message", {})
+                delta = message.get("content", "")
+                if delta:
+                    content_parts.append(delta)
+                    try:
+                        on_token(delta)
+                    except Exception:
+                        pass  # display problems must never kill generation
+                for tc in message.get("tool_calls") or []:
                     fn = tc.get("function", {})
-                    tool_calls.append({
-                        "name": fn.get("name"),
-                        "arguments": fn.get("arguments", {})
-                    })
+                    tool_calls_acc.append({"name": fn.get("name"), "arguments": fn.get("arguments", {})})
+                if chunk.get("done"):
+                    final_chunk = chunk
 
-            # Extract Ollama token metrics
-            prompt_tokens = data.get("prompt_eval_count", 0)
-            completion_tokens = data.get("eval_count", 0)
-            total_duration_ns = data.get("total_duration", 0)
-            duration_sec = (total_duration_ns / 1e9) if total_duration_ns > 0 else elapsed
-
-            metrics = {
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "duration_sec": duration_sec,
-                "backend_label": f"Local ({self.model_name})"
-            }
-
-            return content, tool_calls, metrics
+            elapsed = time.time() - start_time
+            return "".join(content_parts), (tool_calls_acc or None), self._metrics(final_chunk, elapsed)
         except Exception as e:
             elapsed = time.time() - start_time
             return f"Error communicating with local Gemma engine: {str(e)}", None, {"duration_sec": elapsed, "backend_label": "Local Ollama"}

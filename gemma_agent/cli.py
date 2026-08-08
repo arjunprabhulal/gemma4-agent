@@ -18,6 +18,7 @@ KNOWN_COMMANDS = frozenset({
     "/stop", "/pause",
     "/model", "/backend",
     "/skills", "/mcp", "/tools",
+    "/think", "/ground",
 })
 
 
@@ -163,6 +164,27 @@ def main():
                     voice_mode = False
                     ui.voice_enabled = False
                     ui.print_success("Voice Assistant Mode is now DISABLED 🔇")
+                    continue
+                elif cmd == "/ground":
+                    if len(cmd_parts) > 1 and cmd_parts[1].lower() in ["on", "off"]:
+                        agent.grounding_enabled = cmd_parts[1].lower() == "on"
+                    else:
+                        agent.grounding_enabled = not agent.grounding_enabled
+                    if agent.grounding_enabled:
+                        ui.print_success("Grounding ENABLED 🔎 — post-cutoff topics get live web context automatically")
+                    else:
+                        ui.print_success("Grounding DISABLED — the model answers from training data only")
+                    continue
+                elif cmd == "/think":
+                    if len(cmd_parts) > 1 and cmd_parts[1].lower() in ["on", "off"]:
+                        enabled = cmd_parts[1].lower() == "on"
+                    else:
+                        enabled = not agent.thinking_enabled
+                    agent.set_thinking(enabled)
+                    if enabled:
+                        ui.print_success("Thinking mode ENABLED 🧠 — reasoning panels before complex tasks")
+                    else:
+                        ui.print_success("Thinking mode DISABLED ⚡ — direct answers, faster responses")
                     continue
                 elif cmd in ["/model", "/backend"]:
                     if len(cmd_parts) > 1:

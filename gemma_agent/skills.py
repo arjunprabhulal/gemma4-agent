@@ -195,14 +195,10 @@ class SkillManager:
         """
         Returns instructions on using fetch_skill to pull Agent Skills on demand.
         """
-        prompt = "\n\nDYNAMIC AGENT SKILLS INTEGRATION:\n"
-        prompt += (
-            "You have access to the `fetch_skill` tool. For specialized Google Cloud, coding, AI, "
-            "database, or architecture tasks, call `fetch_skill(skill_name='...')` to pull official "
-            "Google skill documentation from https://github.com/google/skills into context. "
-            "Community skills from any GitHub repo using the SKILL.md convention are also supported "
-            "via the optional source argument, e.g. fetch_skill(skill_name='find-skills', source='vercel-labs/skills'). "
-            "To discover community skills, if the `npx` command is available you may run "
-            "`npx skills find <topic>` via bash_run, then fetch the chosen skill by its owner/repo.\n"
+        prompt = (
+            "\n\nAGENT SKILLS: `fetch_skill(skill_name=...)` pulls official docs from google/skills "
+            "into context; pass source='owner/repo' for community SKILL.md repos "
+            "(discoverable via `npx skills find <topic>` through bash_run when npx exists). "
+            "Fetch only for product details you are unsure about.\n"
         )
         return prompt

@@ -64,6 +64,56 @@ class TestGemmaAgent(unittest.TestCase):
         tool_msgs = [m for m in agent.history if m.get("role") == "tool"]
         self.assertEqual(len(tool_msgs), 2)
 
+    def test_forced_grounding_for_post_cutoff_topics(self):
+        """Post-cutoff topics trigger an automatic web_search whose results are
+        injected before the model call; results never persist; /ground off disables."""
+        from unittest.mock import patch
+        seen_messages = []
+
+        class CaptureBackend(LocalGemmaBackend):
+            def generate_response(self, messages, tools_schema=None):
+                seen_messages.append([dict(m) for m in messages])
+                return "ok", None, {"duration_sec": 0}
+
+        agent = GemmaAgent(backend=CaptureBackend(model_name="stub"), tool_registry=ToolRegistry())
+
+        with patch.object(agent.tools, "execute", return_value="Result 1: ADK is real") as pexec:
+            agent.run_turn("write a google ADK agent using the Maps MCP server")
+        pexec.assert_called_once()
+        self.assertEqual(pexec.call_args[0][0], "web_search")
+        notes = [m for m in seen_messages[-1] if str(m.get("content", "")).startswith("System Note:")]
+        self.assertEqual(len(notes), 1)
+        self.assertIn("Result 1: ADK is real", notes[0]["content"])
+        # Injected results stripped from history after the turn
+        leaked = [m for m in agent.history if str(m.get("content", "")).startswith("System Note:")]
+        self.assertEqual(leaked, [])
+
+        # Non-trigger topics: no search, no note
+        with patch.object(agent.tools, "execute") as pexec:
+            agent.run_turn("what is a python list comprehension")
+        pexec.assert_not_called()
+
+        # /ground off disables entirely
+        agent.grounding_enabled = False
+        with patch.object(agent.tools, "execute") as pexec:
+            agent.run_turn("build another adk thing")
+        pexec.assert_not_called()
+
+    def test_thinking_toggle_rebuilds_system_prompt_in_place(self):
+        agent = GemmaAgent(backend=LocalGemmaBackend(model_name="stub"), tool_registry=ToolRegistry())
+        self.assertTrue(agent.thinking_enabled)
+        self.assertIn("THINKING & REASONING MODE", agent.history[0]["content"])
+        self.assertIn("January 2025", agent.history[0]["content"])  # knowledge cutoff stated
+
+        agent.history.append({"role": "user", "content": "hi"})
+        agent.set_thinking(False)
+        self.assertIn("THINKING MODE IS OFF", agent.history[0]["content"])
+        self.assertNotIn("THINKING & REASONING MODE", agent.history[0]["content"])
+        self.assertEqual(len(agent.history), 2)  # conversation preserved
+
+        agent.set_thinking(True)
+        self.assertIn("THINKING & REASONING MODE", agent.history[0]["content"])
+
     def test_string_tool_arguments_are_coerced(self):
         """Arguments arriving as a JSON string (OpenAI wire format) must not crash the loop."""
         class StrArgsBackend(LocalGemmaBackend):

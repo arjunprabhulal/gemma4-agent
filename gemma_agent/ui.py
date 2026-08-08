@@ -1,5 +1,7 @@
+from contextlib import contextmanager
 from typing import Any, Dict, Optional
 from rich.console import Console
+from rich.live import Live
 from rich.panel import Panel
 from rich.markdown import Markdown
 from rich.text import Text
@@ -59,6 +61,18 @@ def wait_for_speech_to_finish(timeout: Optional[float] = None):
         _speech_proc = None
 
 
+@contextmanager
+def streaming_live():
+    """Show model output token-by-token while it generates (like `ollama run`),
+    then vanish so the final rendered panels take over. Yields an update
+    function taking the full accumulated text."""
+    with Live(Text("🧠 …", style="dim"), console=console, refresh_per_second=12, transient=True) as live:
+        def update(full_text: str):
+            tail = full_text[-1500:]  # keep the live region bounded
+            live.update(Text(f"🧠 {tail}", style="dim"))
+        yield update
+
+
 def print_banner(backend_name: str, model_name: str):
     grid = Table.grid(expand=True)
     grid.add_column(justify="left")
@@ -71,7 +85,7 @@ def print_banner(backend_name: str, model_name: str):
     info_table.add_column(style="bold white", justify="left")
     info_table.add_row("Backend:", f"[bold cyan]{backend_name}[/bold cyan]")
     info_table.add_row("Model:", f"[bold green]{escape(model_name)}[/bold green]")
-    info_table.add_row("Commands:", "[dim]/voice, /stop, /model, /tools, /skills, /mcp, /history, /clear, /help, /exit[/dim]")
+    info_table.add_row("Commands:", "[dim]/voice, /stop, /think, /model, /tools, /skills, /mcp, /history, /clear, /help, /exit[/dim]")
 
     panel_content = Table.grid(expand=True)
     panel_content.add_column()
@@ -241,6 +255,8 @@ def print_help():
     table.add_row("/history", "Display conversation transcript")
     table.add_row(escape("/voice [seconds]"), "Toggle 2-Way Voice Mode; optional speech-wait window (aliases: /mic, /talk)")
     table.add_row("/stop", "Disable Voice Assistant mode and return to typing (alias: /pause)")
+    table.add_row(escape("/think [on|off]"), "Toggle step-by-step reasoning mode (off = faster direct answers)")
+    table.add_row(escape("/ground [on|off]"), "Toggle automatic web-grounding for post-cutoff topics")
     table.add_row("/model <tag>", "Switch active local Gemma model tag on the fly (alias: /backend)")
     table.add_row("/exit or /quit", "Exit the agent CLI")
     console.print(table)

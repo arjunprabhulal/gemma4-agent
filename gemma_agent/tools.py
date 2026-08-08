@@ -209,7 +209,7 @@ class ToolRegistry:
         # 7. Web Search Tool
         self.register(
             name="web_search",
-            description="Perform a live web search for current news, facts, documentation, or real-time web results.",
+            description="Perform a live web search. Use ONLY for information likely newer than your training data (current news, recent releases, live facts, prices) — not for general knowledge or programming concepts you already know.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -271,10 +271,13 @@ class ToolRegistry:
 
 
     def get_system_prompt_tool_descriptions(self) -> str:
+        # Names and descriptions only — full JSON schemas are already sent
+        # natively in the API payload; duplicating them here cost ~1K prompt
+        # tokens on every single turn.
         desc = "AVAILABLE AGENT TOOLS:\n"
         for name, tool in self.tools.items():
-            desc += f"- {name}: {tool['description']}\n"
-            desc += f"  Parameters schema: {json.dumps(tool['parameters'])}\n"
+            params = ", ".join(tool["parameters"].get("properties", {}).keys())
+            desc += f"- {name}({params}): {tool['description']}\n"
         return desc
 
     # Implementation helper functions
