@@ -55,8 +55,11 @@ def _transcribe(recognizer, audio_data, sr_module) -> Optional[str]:
         return recognizer.recognize_faster_whisper(audio_data, model=_WHISPER_MODEL)
     except sr_module.UnknownValueError:
         return None  # audio was unintelligible
-    except ImportError:
-        ui.print_error("Local speech engine missing. Run: pip install faster-whisper")
+    except ImportError as e:
+        # Name the ACTUAL missing module — a transitive gap (e.g. soundfile)
+        # is not fixed by reinstalling faster-whisper.
+        missing = getattr(e, "name", None) or "faster-whisper"
+        ui.print_error(f"Voice transcription needs the '{missing}' package. Run: pip install {missing}")
         return None
     except Exception as e:
         ui.print_error(f"Local transcription failed: {e}")

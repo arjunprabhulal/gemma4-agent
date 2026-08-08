@@ -5,4 +5,5 @@ numpy>=1.20.0
 sounddevice>=0.4.0
 SpeechRecognition>=3.10.0
 faster-whisper>=1.0.0
+soundfile>=0.12.1
 mss>=9.0.0
