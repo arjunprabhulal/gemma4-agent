@@ -18,7 +18,7 @@ KNOWN_COMMANDS = frozenset({
     "/stop", "/pause",
     "/model", "/backend",
     "/skills", "/mcp", "/tools",
-    "/think", "/ground",
+    "/think", "/ground", "/confirm",
 })
 
 
@@ -74,6 +74,11 @@ def main():
         action="store_true",
         help="Download and cache the local voice transcription model (~74MB, one-time), then exit."
     )
+    parser.add_argument(
+        "--yolo",
+        action="store_true",
+        help="Skip approval prompts for bash_run/python_eval/write_file (prompts are on by default in the REPL; -e mode never prompts)."
+    )
 
     args = parser.parse_args()
 
@@ -87,6 +92,20 @@ def main():
     backend = LocalGemmaBackend(model_name=model_name, host=args.host)
     tools = ToolRegistry()
     agent = GemmaAgent(backend=backend, tool_registry=tools)
+
+    def _confirm_tool(tool_name: str, tool_args: dict) -> bool:
+        preview = str(tool_args.get("command") or tool_args.get("code")
+                      or tool_args.get("filepath") or tool_args)[:200]
+        from rich.markup import escape as _esc
+        answer = ui.console.input(
+            f"[warning]⚠  Approve [bold]{_esc(tool_name)}[/bold]: {_esc(preview)!s} — run it? \\[y/N] [/warning]"
+        )
+        return answer.strip().lower() in ("y", "yes")
+
+    # Approval gate for system-modifying tools: on by default in the
+    # interactive REPL; off in one-shot -e mode and with --yolo.
+    if not args.exec and not args.yolo:
+        tools.confirm_callback = _confirm_tool
 
     voice_mode = args.voice
     ui.voice_enabled = args.voice
@@ -164,6 +183,17 @@ def main():
                     voice_mode = False
                     ui.voice_enabled = False
                     ui.print_success("Voice Assistant Mode is now DISABLED 🔇")
+                    continue
+                elif cmd == "/confirm":
+                    if len(cmd_parts) > 1 and cmd_parts[1].lower() in ["on", "off"]:
+                        enable = cmd_parts[1].lower() == "on"
+                    else:
+                        enable = tools.confirm_callback is None
+                    tools.confirm_callback = _confirm_tool if enable else None
+                    if enable:
+                        ui.print_success("Tool approval ENABLED 🛡 — bash_run/python_eval/write_file ask before running")
+                    else:
+                        ui.print_success("Tool approval DISABLED — system tools run without asking")
                     continue
                 elif cmd == "/ground":
                     if len(cmd_parts) > 1 and cmd_parts[1].lower() in ["on", "off"]:

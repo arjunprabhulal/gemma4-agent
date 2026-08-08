@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Tool approval gate: `bash_run`/`python_eval`/`write_file` require user
+  confirmation in the REPL (`/confirm [on|off]`, `--yolo` to skip)
+- Native Gemma 4 thinking via Ollama's `think` API — `/think` now controls the
+  model directly instead of by prompt instruction
+- Quoted image paths containing spaces are detected for vision input
+- Output caps on `bash_run`, `python_eval`, `read_file`, and `list_directory`
+  so a single command cannot exhaust the model's context window
+
+### Changed
+- Thinking rules moved to the end of the system prompt for instruction recency
+- JSON tool-call fallback extracts objects from surrounding prose and notes
+  escaping for code-bearing arguments
+
 ## [1.0.0] — 2026-08-08
 
 An autonomous, multimodal (text · vision · voice) AI terminal agent powered by

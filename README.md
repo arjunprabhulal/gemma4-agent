@@ -42,7 +42,8 @@
 - 🌐 **Dynamic Agent Skills Integration**: On-demand download of skill docs injected into the agent's context — official Google Cloud skills (Cloud Run, GKE, BigQuery, AlloyDB, Spanner, and more) by default, plus community skills from any GitHub repo using the `SKILL.md` convention. Discover community skills with [`npx skills find`](https://skills.sh) and fetch them by `owner/repo`.
 - 🔌 **Model Context Protocol (MCP) Registry (Experimental)**: Register and list MCP server configurations (`/mcp`). Note: server processes are not yet spawned or queried — full MCP client support is on the roadmap.
 - 🧠 **Deep Reasoning Panels**: Displays `<think>...</think>` step-by-step internal planning before executing tool calls.
-- ⚡ **Live Token Streaming**: Watch responses generate token-by-token (like `ollama run`), with the final answer rendered as formatted markdown.
+- 🛡 **Tool Approval Gate**: `bash_run`, `python_eval`, and `write_file` ask for your approval before executing (on by default in the REPL) — the model proposes, you decide. Disable with `/confirm off` or `--yolo`.
+- ⚡ **Live Token Streaming**: Watch responses generate token-by-token (like `ollama run`), with the final answer rendered as formatted markdown — including Gemma 4's native thinking, controlled by `/think` via Ollama's think API.
 - 🔎 **Automatic Grounding**: Prompts mentioning SDKs newer than the model's January 2025 cutoff (Google ADK, A2A, agents-cli, …) trigger a visible live web search first, so the model writes real APIs instead of guessing — toggle with `/ground`.
 - 📊 **Local Performance Metrics**: Per-turn latency and token consumption, rendered locally in your terminal — never transmitted anywhere.
 
@@ -148,6 +149,7 @@ Inside the `gemma4-agent` REPL session, use slash commands to manage assistant m
 | `/clear` | Reset conversation state and clear history |
 | `/think [on\|off]` | Toggle step-by-step reasoning mode — off gives faster, direct answers |
 | `/ground [on\|off]` | Toggle automatic live web-grounding when prompts mention post-cutoff SDKs (ADK, A2A, …) |
+| `/confirm [on\|off]` | Toggle approval prompts before `bash_run`/`python_eval`/`write_file` execute (on by default; `--yolo` disables at launch) |
 | `/model <tag>` | Switch active local Gemma model tag on the fly (e.g. `/model gemma4:12b`; alias: `/backend`) |
 | `/exit` or `/quit` | Exit `gemma4-agent` |
 
