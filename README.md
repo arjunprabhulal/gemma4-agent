@@ -30,7 +30,7 @@
 - ⚡ **Interactive Lightning REPL**: Features a terminal interface powered by `prompt_toolkit` and `rich`, complete with command history, syntax-highlighted code previews, and live slash commands.
 - 👁️ **Multimodal Vision Integration**: Include a local image file path (`.png`, `.jpg`, `.webp`) in your prompt and it is auto-detected and fed as base64 frames directly to local Gemma vision models.
 - 🎙️🔊 **2-Way Hands-Free Voice Assistant Mode**: Toggle full voice assistant mode (`/voice`) to speak instructions via microphone and hear agent answers via spoken speaker output. Transcription runs on-device with [Whisper](https://github.com/openai/whisper) via the fast [faster-whisper](https://github.com/SYSTRAN/faster-whisper) implementation — your voice never leaves the machine. (Fetch the ~74MB model during setup with `gemma4-agent --setup-voice`; otherwise it downloads automatically when you first enable voice mode.)
-- 🛠️ **10 Native Built-in Agent Tools**:
+- 🛠️ **11 Native Built-in Agent Tools**:
   - `bash_run`: Local shell command execution.
   - `read_file` & `write_file`: File inspection and creation.
   - `list_directory`: Local filesystem browser.
@@ -39,6 +39,7 @@
   - `fetch_skill`: Agent Skill fetcher — [google/skills](https://github.com/google/skills) by default, or any GitHub repo using the `SKILL.md` convention (the [skills.sh](https://skills.sh) ecosystem).
   - `take_screenshot`: Cross-platform desktop screenshot via `mss` (native macOS `screencapture` fallback).
   - `ripgrep_search`: High-speed regex code search across large repositories.
+  - `analyze_audio`: Native Gemma 4 audio understanding — transcribe speech or describe sounds in local `.wav`/`.mp3` files (runs on an audio-capable variant like `gemma4:12b`, fully local).
 - 🌐 **Dynamic Agent Skills Integration**: On-demand download of skill docs injected into the agent's context — official Google Cloud skills (Cloud Run, GKE, BigQuery, AlloyDB, Spanner, and more) by default, plus community skills from any GitHub repo using the `SKILL.md` convention. Discover community skills with [`npx skills find`](https://skills.sh) and fetch them by `owner/repo`.
 - 🔌 **Model Context Protocol (MCP) Registry (Experimental)**: Register and list MCP server configurations (`/mcp`). Note: server processes are not yet spawned or queried — full MCP client support is on the roadmap.
 - 🧠 **Deep Reasoning Panels**: Displays `<think>...</think>` step-by-step internal planning before executing tool calls.
@@ -169,6 +170,7 @@ Inside the `gemma4-agent` REPL session, use slash commands to manage assistant m
 | `fetch_skill` | `skill_name`, `source` (optional) | Fetch an Agent Skill from `google/skills` (default) or any GitHub `owner/repo` with `SKILL.md` files |
 | `take_screenshot` | `filename` | Capture desktop screenshot to a file (`mss`, cross-platform; macOS fallback); reference the saved path in a follow-up prompt for vision analysis |
 | `ripgrep_search` | `query`, `path` | High-speed regex code search across files |
+| `analyze_audio` | `filepath`, `question` (optional) | Transcribe or describe a local audio file via Gemma 4's native audio input (requires `gemma4:12b`) |
 
 ---
 
@@ -191,8 +193,8 @@ graph TD
         CLI --> Agent["agent.py — GemmaAgent Orchestrator"]
         Agent <--> Backend["backends.py — LocalGemmaBackend"]
         Backend <--> Ollama["Ollama — localhost:11434 (Gemma 4 + Vision)"]
-        Agent <--> Registry["tools.py — ToolRegistry (10 tools)"]
-        Registry --> SystemTools["Bash · Files · Python · Screenshot · ripgrep"]
+        Agent <--> Registry["tools.py — ToolRegistry (11 tools)"]
+        Registry --> SystemTools["Bash · Files · Python · Screenshot · ripgrep · Audio"]
         Registry --> Skills["skills.py — SkillManager"]
         CLI --> MCP["mcp.py — MCP config registry (experimental)"]
         Agent --> UI["ui.py — Rich Renderer + TTS"]

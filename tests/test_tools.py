@@ -17,16 +17,56 @@ class TestToolRegistry(unittest.TestCase):
     def test_tool_registry_all_10_tools(self):
         tools = ToolRegistry()
         schemas = tools.get_schemas()
-        self.assertEqual(len(schemas), 10)
+        self.assertEqual(len(schemas), 11)
         tool_names = [t["function"]["name"] for t in schemas]
 
         expected_tools = [
             "bash_run", "read_file", "write_file", "list_directory",
             "python_eval", "web_fetch", "web_search", "fetch_skill",
-            "take_screenshot", "ripgrep_search"
+            "take_screenshot", "ripgrep_search", "analyze_audio"
         ]
         for t in expected_tools:
             self.assertIn(t, tool_names)
+
+    def test_analyze_audio_payload_and_errors(self):
+        """Native-audio tool: correct OpenAI-format payload, clean error paths."""
+        import struct
+        import tempfile
+        import wave as wave_mod
+        from unittest.mock import Mock, patch
+        tools = ToolRegistry()
+
+        self.assertIn("does not exist", tools.execute("analyze_audio", {"filepath": "/nope/missing.wav"}))
+        self.assertIn("supports .wav and .mp3", tools.execute("analyze_audio", {"filepath": "/tmp/notes.txt"}))
+
+        path = tempfile.mktemp(suffix=".wav")
+        with wave_mod.open(path, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(16000)
+            wf.writeframes(struct.pack("<h", 0) * 1600)
+        try:
+            resp = Mock(status_code=200)
+            resp.json = lambda: {"choices": [{"message": {"content": "a quiet tone"}}]}
+            with patch("gemma_agent.tools.requests.post", return_value=resp) as post:
+                out = tools.execute("analyze_audio", {"filepath": path, "question": "what is it?"})
+            self.assertEqual(out, "a quiet tone")
+            # The verified working endpoint and payload shape
+            self.assertIn("/v1/chat/completions", post.call_args[0][0])
+            payload = post.call_args.kwargs["json"]
+            self.assertEqual(payload["model"], "gemma4:12b")
+            audio_part = payload["messages"][0]["content"][0]
+            self.assertEqual(audio_part["type"], "input_audio")
+            self.assertEqual(audio_part["input_audio"]["format"], "wav")
+            self.assertGreater(len(audio_part["input_audio"]["data"]), 100)
+
+            # Missing model → actionable hint
+            resp404 = Mock(status_code=404, text="model not found")
+            with patch("gemma_agent.tools.requests.post", return_value=resp404):
+                out = tools.execute("analyze_audio", {"filepath": path})
+            self.assertIn("ollama pull", out)
+        finally:
+            os.remove(path)
 
     def test_confirmation_gate_blocks_and_allows(self):
         """Denied approvals cancel system tools with a model-readable message;

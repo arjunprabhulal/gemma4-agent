@@ -90,7 +90,7 @@ def main():
 
     model_name = args.model or "gemma4:26b"
     backend = LocalGemmaBackend(model_name=model_name, host=args.host)
-    tools = ToolRegistry()
+    tools = ToolRegistry(ollama_host=args.host)
     agent = GemmaAgent(backend=backend, tool_registry=tools)
 
     def _confirm_tool(tool_name: str, tool_args: dict) -> bool:

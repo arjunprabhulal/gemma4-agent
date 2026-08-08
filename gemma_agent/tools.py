@@ -6,6 +6,7 @@ Provides registry and execution engine for native agent capabilities
 """
 
 import os
+import base64
 import subprocess
 import requests
 import json
@@ -63,16 +64,23 @@ class ToolRegistry:
     """Registry and execution engine for Gemma CLI Agent tools."""
 
     def __init__(self, skill_manager: Optional[Any] = None,
-                 confirm_callback: Optional[Callable[[str, Dict[str, Any]], bool]] = None):
+                 confirm_callback: Optional[Callable[[str, Dict[str, Any]], bool]] = None,
+                 ollama_host: str = "http://localhost:11434",
+                 audio_model: str = "gemma4:12b"):
         """Initialize ToolRegistry and register default tools.
 
         Args:
             confirm_callback: When set, called as (tool_name, args) before any
                 CONFIRM_TOOLS execution; returning False cancels the call.
+            ollama_host: Local Ollama base URL (used by analyze_audio).
+            audio_model: Audio-capable Gemma 4 variant for analyze_audio —
+                must be E2B/E4B/12B; the 26B/31B cannot take audio input.
         """
         self.tools: Dict[str, Dict[str, Any]] = {}
         self.skill_manager = skill_manager
         self.confirm_callback = confirm_callback
+        self.ollama_host = ollama_host.rstrip("/")
+        self.audio_model = audio_model
         self.register_defaults()
 
     def register(self, name: str, description: str, parameters: Dict[str, Any], func: Callable) -> None:
@@ -280,7 +288,26 @@ class ToolRegistry:
             func=self._take_screenshot
         )
 
-        # 10. Ripgrep Fast Code Search Tool
+        # 10. Analyze Audio Tool (native Gemma 4 hearing on the 12B)
+        self.register(
+            name="analyze_audio",
+            description=(
+                "Analyze a local audio file (.wav or .mp3) using Gemma 4's native audio "
+                "understanding: transcribe speech, describe sounds, judge tone. "
+                "Runs fully locally on an audio-capable Gemma 4 variant."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "filepath": {"type": "string", "description": "Path to the local audio file (.wav or .mp3)."},
+                    "question": {"type": "string", "description": "Optional question about the audio (default: transcribe and describe it)."}
+                },
+                "required": ["filepath"]
+            },
+            func=self._analyze_audio
+        )
+
+        # 11. Ripgrep Fast Code Search Tool
         self.register(
             name="ripgrep_search",
             description="Perform instant high-speed regex/keyword code searches across large codebases.",
@@ -478,6 +505,45 @@ class ToolRegistry:
             return f"Screenshot error (exit code {res.returncode}): {res.stderr.strip() or 'could not capture display'}"
         except Exception as e:
             return f"Screenshot error: {str(e)}"
+
+    def _analyze_audio(self, filepath: str, question: str = "Transcribe any speech and describe this audio.") -> str:
+        """Native Gemma 4 audio understanding via Ollama's OpenAI-compatible
+        endpoint — the only path that delivers audio to the model (the native
+        /api/chat silently drops audio fields; verified empirically)."""
+        path = os.path.expanduser(filepath)
+        ext = os.path.splitext(path)[1].lower().lstrip(".")
+        if ext not in ("wav", "mp3"):
+            return f"Error: analyze_audio supports .wav and .mp3 files (got '{ext or 'no extension'}')."
+        if not os.path.isfile(path):
+            return f"Error: File '{filepath}' does not exist."
+        try:
+            size = os.path.getsize(path)
+            if size > 10 * 1024 * 1024:
+                return f"Error: Audio file too large ({size // (1024 * 1024)}MB; 10MB limit)."
+            with open(path, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode()
+            payload = {
+                "model": self.audio_model,
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {"type": "input_audio", "input_audio": {"data": b64, "format": ext}},
+                        {"type": "text", "text": question},
+                    ],
+                }],
+            }
+            resp = requests.post(f"{self.ollama_host}/v1/chat/completions", json=payload, timeout=300)
+            if resp.status_code == 404:
+                return (f"Error: audio model '{self.audio_model}' is not available locally. "
+                        f"Run: ollama pull {self.audio_model}")
+            if resp.status_code != 200:
+                return f"Error: audio analysis failed (HTTP {resp.status_code}): {resp.text[:200]}"
+            content = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+            if not content:
+                return "Error: the audio model returned an empty response."
+            return _truncate(content, 4000, "audio analysis")
+        except Exception as e:
+            return f"Error analyzing audio '{filepath}': {str(e)}"
 
     def _ripgrep_search(self, query: str, path: str = ".") -> str:
         search_path = os.path.expanduser(path)
