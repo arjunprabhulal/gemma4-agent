@@ -1,12 +1,9 @@
 # Changelog
 
-All notable changes to **gemma4-agent** are documented here.
-Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](https://semver.org/).
-
 ## [1.0.0] — 2026-08-08
 
-First public release: an autonomous, multimodal (text · vision · voice) AI terminal
-agent powered by Google Gemma 4 via Ollama — 100% local inference, no cloud APIs, no keys.
+An autonomous, multimodal (text · vision · voice) AI terminal agent powered by
+Google Gemma 4 via Ollama — 100% local inference, no cloud APIs, no keys.
 
 ### Added
 - Autonomous agent loop with multi-step tool calling, per-turn deduplication, and
