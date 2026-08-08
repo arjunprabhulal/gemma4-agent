@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import os
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import InMemoryHistory
@@ -7,6 +8,34 @@ from gemma_agent.backends import LocalGemmaBackend
 from gemma_agent.agent import GemmaAgent
 from gemma_agent.tools import ToolRegistry
 from gemma_agent import ui
+
+
+# Single source of truth for every REPL command and alias.
+KNOWN_COMMANDS = frozenset({
+    "/exit", "/quit",
+    "/help", "/clear", "/history",
+    "/voice", "/mic", "/talk",
+    "/stop", "/pause",
+    "/model", "/backend",
+    "/skills", "/mcp", "/tools",
+})
+
+
+def _is_slash_command(user_input: str) -> bool:
+    """True only for genuine /commands, decided against KNOWN_COMMANDS.
+
+    Absolute file paths also begin with '/' (e.g. /Users/me/shot.png) and must
+    reach the model as normal prompts; for unknown '/' tokens, path-like input
+    falls through while command-like typos still get the 'Unknown command' help.
+    """
+    if not user_input.startswith("/"):
+        return False
+    first_token = user_input.split()[0]
+    if first_token.lower() in KNOWN_COMMANDS:
+        return True
+    if "/" in first_token[1:] or os.path.exists(first_token):
+        return False  # a filesystem path, not a command
+    return True  # unknown single '/word' — likely a typo, show command help
 
 
 def main():
@@ -104,8 +133,9 @@ def main():
             if not user_input:
                 continue
 
-            # Handle slash commands
-            if user_input.startswith("/"):
+            # Handle slash commands (file paths starting with '/' fall through
+            # to the agent as normal prompts)
+            if _is_slash_command(user_input):
                 cmd_parts = user_input.split()
                 cmd = cmd_parts[0].lower()
 

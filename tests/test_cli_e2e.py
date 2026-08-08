@@ -48,6 +48,20 @@ class TestCLIEndToEnd(unittest.TestCase):
         self.assertIn("Unknown command", out)              # bad command handled gracefully
         self.assertIn("Goodbye", out)                      # clean /exit
 
+    def test_slash_command_vs_file_path_detection(self):
+        """Absolute file paths start with '/' but are prompts, not commands."""
+        from gemma_agent.cli import _is_slash_command
+        # Real commands
+        self.assertTrue(_is_slash_command("/help"))
+        self.assertTrue(_is_slash_command("/model gemma4:12b"))
+        self.assertTrue(_is_slash_command("/skills clear"))
+        self.assertTrue(_is_slash_command("/definitely-a-typo"))
+        # File paths — must reach the model as prompts (the exact user-reported case)
+        self.assertFalse(_is_slash_command("/Users/me/Desktop/diagram.png convert this into code"))
+        self.assertFalse(_is_slash_command("/tmp/x.png describe"))
+        self.assertFalse(_is_slash_command("/etc"))          # bare existing path
+        self.assertFalse(_is_slash_command("plain question"))
+
     def test_exec_mode_flag_parses(self):
         # --help must work and exit 0 without a model or network
         proc = subprocess.run(
