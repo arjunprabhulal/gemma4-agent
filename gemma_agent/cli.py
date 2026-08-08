@@ -189,8 +189,6 @@ def main():
                     ui.voice_enabled = voice_mode
                     if voice_mode:
                         ui.print_success(f"Voice Assistant Mode is now ENABLED 🎙️🔊 ({mic_duration}s speech-wait · {voice_engine} ears)")
-                        if voice_engine == "gemma":
-                            ui.print_info("🔬 Gemma-native transcription: ~6s per utterance vs ~0.8s for Whisper (measured); needs gemma4:12b pulled. Switch back with /voice whisper.")
                         from gemma_agent.voice_input import ensure_voice_model
                         if voice_engine == "whisper":
                             ensure_voice_model()
