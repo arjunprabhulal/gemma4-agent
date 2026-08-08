@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gemma4-agent"
-version = "1.0.0"
+version = "1.1.0"
 description = "Autonomous, multimodal (text/vision/voice), 100% local AI terminal agent powered by Google Gemma 4 via Ollama"
 readme = "README.md"
 authors = [{ name = "Arjun Prabhulal" }]
