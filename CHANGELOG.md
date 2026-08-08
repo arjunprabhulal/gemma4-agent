@@ -1,20 +1,30 @@
 # Changelog
 
-## [Unreleased]
+## [1.1.0] — 2026-08-08
 
 ### Added
 - Tool approval gate: `bash_run`/`python_eval`/`write_file` require user
-  confirmation in the REPL (`/confirm [on|off]`, `--yolo` to skip)
-- Native Gemma 4 thinking via Ollama's `think` API — `/think` now controls the
-  model directly instead of by prompt instruction
-- Quoted image paths containing spaces are detected for vision input
-- Output caps on `bash_run`, `python_eval`, `read_file`, and `list_directory`
-  so a single command cannot exhaust the model's context window
+  confirmation in the REPL (`/confirm [on|off]`, `--yolo` to skip); the gate
+  fails closed and was adversarially verified against bypass attempts
+- Live token streaming — responses render token-by-token like `ollama run`
+- Native Gemma 4 thinking via Ollama's `think` API — `/think [on|off]`
+  controls the model directly instead of by prompt instruction
+- Automatic web-grounding for prompts naming SDKs newer than the model's
+  January 2025 cutoff (Google ADK, A2A, agents-cli, …) — `/ground [on|off]`
+- Quoted image paths containing spaces (and trailing punctuation) are
+  detected for vision input
+- Output caps on every tool path — `bash_run`, `python_eval`, `read_file`,
+  `list_directory`, and the ripgrep fallback — so a single command cannot
+  exhaust the model's context window
 
 ### Changed
-- Thinking rules moved to the end of the system prompt for instruction recency
-- JSON tool-call fallback extracts objects from surrounding prose and notes
-  escaping for code-bearing arguments
+- System prompt reduced ~60%; thinking rules moved to the end for
+  instruction recency; knowledge cutoff stated explicitly
+- JSON tool-call parser rewritten: fence-isolated parsing, prose-brace
+  tolerant scanning, bare arrays, lenient newlines in arguments
+- Simple questions answer ~3x faster (measured) via concise-answer guidance
+
+[1.1.0]: https://github.com/arjunprabhulal/gemma4-agent/releases/tag/v1.1.0
 
 ## [1.0.0] — 2026-08-08
 
