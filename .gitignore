@@ -45,3 +45,4 @@ wheels/
 *.png
 !assets/*.png
 !assets/*.jpg
+.coverage

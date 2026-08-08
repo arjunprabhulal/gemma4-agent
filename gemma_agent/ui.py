@@ -83,7 +83,7 @@ def print_banner(backend_name: str, model_name: str):
     info_table = Table.grid(padding=(0, 2))
     info_table.add_column(style="bold yellow", justify="right")
     info_table.add_column(style="bold white", justify="left")
-    info_table.add_row("Backend:", f"[bold cyan]{backend_name}[/bold cyan]")
+    info_table.add_row("Backend:", f"[bold cyan]{escape(backend_name)}[/bold cyan]")
     info_table.add_row("Model:", f"[bold green]{escape(model_name)}[/bold green]")
     info_table.add_row("Commands:", "[dim]/voice, /stop, /think, /model, /tools, /skills, /mcp, /history, /clear, /help, /exit[/dim]")
 
@@ -186,7 +186,7 @@ def print_tool_result(result: str, is_error: bool = False):
 
 def print_markdown(content: str, title: Optional[str] = None, speak: bool = True):
     md = Markdown(content.strip())
-    panel_title = f"[bold cyan]✨ 💎 Google Gemma 4[/bold cyan] [bold magenta]{title or 'Agent'}[/bold magenta]"
+    panel_title = f"[bold cyan]✨ 💎 Google Gemma 4[/bold cyan] [bold magenta]{escape(title or 'Agent')}[/bold magenta]"
     console.print(Panel(
         md,
         title=panel_title,
@@ -253,7 +253,7 @@ def print_help():
     table.add_row("/skills", "List cached Agent Skills; '/skills clear' resets the cache")
     table.add_row("/mcp", "Register/list/remove MCP server configs (experimental)")
     table.add_row("/history", "Display conversation transcript")
-    table.add_row(escape("/voice [seconds]"), "Toggle 2-Way Voice Mode; optional speech-wait window (aliases: /mic, /talk)")
+    table.add_row(escape("/voice [seconds] [gemma|whisper]"), "Toggle 2-Way Voice Mode; optional wait window and transcription engine (aliases: /mic, /talk)")
     table.add_row("/stop", "Disable Voice Assistant mode and return to typing (alias: /pause)")
     table.add_row(escape("/think [on|off]"), "Toggle step-by-step reasoning mode (off = faster direct answers)")
     table.add_row(escape("/ground [on|off]"), "Toggle automatic web-grounding for post-cutoff topics")

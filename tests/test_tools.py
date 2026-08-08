@@ -153,6 +153,21 @@ class TestToolRegistry(unittest.TestCase):
         res = tools.execute("web_fetch", {"url": "file:///etc/passwd"})
         self.assertIn("URL blocked", res)
 
+    def test_web_fetch_redirect_handling(self):
+        """Redirects to private hosts are blocked; endless redirects error out."""
+        from unittest.mock import Mock, patch
+        tools = ToolRegistry()
+
+        to_private = Mock(status_code=302, headers={"location": "http://127.0.0.1/secret"})
+        with patch("gemma_agent.tools.requests.get", return_value=to_private):
+            res = tools.execute("web_fetch", {"url": "https://example.com/"})
+        self.assertIn("redirect blocked", res)
+
+        loop = Mock(status_code=302, headers={"location": "https://example.com/loop"})
+        with patch("gemma_agent.tools.requests.get", return_value=loop):
+            res = tools.execute("web_fetch", {"url": "https://example.com/start"})
+        self.assertIn("too many redirects", res)
+
     def test_take_screenshot_tool(self):
         tools = ToolRegistry()
         target_path = "/tmp/test_gemma_screenshot.png"

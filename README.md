@@ -141,7 +141,7 @@ Inside the `gemma4-agent` REPL session, use slash commands to manage assistant m
 | Command | Action |
 | :--- | :--- |
 | `/help` | Display interactive CLI help menu and command list |
-| `/voice [seconds]` | Toggle 2-Way Voice Mode, with optional mic wait window (aliases: `/mic`, `/talk`) |
+| `/voice [seconds] [gemma\|whisper]` | Toggle 2-Way Voice Mode — optional wait window and transcription engine: Whisper (default, ~0.8s) or Gemma 4's native hearing via the 12B (~6s, "every network is Gemma") |
 | `/stop` | Disable Voice Mode and return to keyboard typing (alias: `/pause`) |
 | `/tools` | List all active agent tools |
 | `/skills` | Display cached Agent Skills (`/skills clear` resets the cache) |

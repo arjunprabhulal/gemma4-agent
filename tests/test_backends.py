@@ -51,6 +51,52 @@ class TestLocalGemmaBackend(unittest.TestCase):
         self.assertEqual(content, "<think>2 plus 2 is 4</think>Four")
         self.assertTrue(post.call_args.kwargs["json"]["think"])
 
+    def test_check_connection_paths(self):
+        backend = LocalGemmaBackend(model_name="stub")
+        ok_resp = Mock(status_code=200)
+        ok_resp.json = lambda: {"models": [{"name": "gemma4:26b"}, {"model": "noname"}]}
+        with patch("gemma_agent.backends.requests.get", return_value=ok_resp):
+            ok, msg = backend.check_connection()
+        self.assertTrue(ok)
+        self.assertIn("gemma4:26b", msg)
+
+        bad_resp = Mock(status_code=500)
+        with patch("gemma_agent.backends.requests.get", return_value=bad_resp):
+            ok, msg = backend.check_connection()
+        self.assertFalse(ok)
+
+        with patch("gemma_agent.backends.requests.get", side_effect=OSError("refused")):
+            ok, msg = backend.check_connection()
+        self.assertFalse(ok)
+        self.assertIn("refused", msg)
+
+        # 200 with malformed body: connected, honest note — not a fake refusal
+        weird = Mock(status_code=200)
+        weird.json = Mock(side_effect=ValueError("bad json"))
+        with patch("gemma_agent.backends.requests.get", return_value=weird):
+            ok, msg = backend.check_connection()
+        self.assertTrue(ok)
+        self.assertIn("unexpected", msg)
+
+    def test_generate_response_error_paths(self):
+        backend = LocalGemmaBackend(model_name="stub")
+        err_resp = Mock(status_code=500, text="boom")
+        with patch("gemma_agent.backends.requests.post", return_value=err_resp):
+            content, tc, metrics = backend.generate_response([{"role": "user", "content": "hi"}])
+        self.assertIn("HTTP 500", content)
+        self.assertIsNone(tc)
+
+        with patch("gemma_agent.backends.requests.post", side_effect=OSError("down")):
+            content, tc, _ = backend.generate_response([{"role": "user", "content": "hi"}])
+        self.assertIn("Error communicating", content)
+
+        # Streaming HTTP error surface
+        err_resp2 = Mock(status_code=502, text="bad gateway")
+        with patch("gemma_agent.backends.requests.post", return_value=err_resp2):
+            content, _, _ = backend.generate_response(
+                [{"role": "user", "content": "hi"}], on_token=lambda d: None)
+        self.assertIn("HTTP 502", content)
+
     def test_image_paths_with_spaces_detected_when_quoted(self):
         import tempfile
         from gemma_agent.backends import _extract_image_paths

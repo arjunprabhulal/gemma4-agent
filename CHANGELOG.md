@@ -6,7 +6,15 @@
 - `analyze_audio` tool — native Gemma 4 audio understanding for local
   `.wav`/`.mp3` files (transcription, sound description, tone) via Ollama's
   OpenAI-compatible endpoint on an audio-capable variant (`gemma4:12b`).
-  Live voice input continues to use on-device Whisper.
+  Live voice input continues to use on-device Whisper by default.
+- Selectable voice transcription engine: `/voice gemma` uses Gemma 4's
+  native hearing for live speech (measured ~6s/utterance vs ~0.8s Whisper);
+  `/voice whisper` restores the default; unknown options now warn instead
+  of being silently ignored
+
+### Fixed
+- Ctrl+C during voice recording cancels the capture instead of ending the
+  session; Ctrl+C during generation cancels the turn, not the session
 
 ## [1.1.0] — 2026-08-08
 
