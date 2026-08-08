@@ -10,7 +10,8 @@
 - Selectable voice transcription engine: `/voice gemma` uses Gemma 4's
   native hearing for live speech (measured ~6s/utterance vs ~0.8s Whisper);
   `/voice whisper` restores the default; unknown options now warn instead
-  of being silently ignored
+  of being silently ignored. A progress spinner shows during Gemma
+  transcription, and the voice status line names the active engine
 
 ### Fixed
 - Ctrl+C during voice recording cancels the capture instead of ending the
