@@ -180,15 +180,19 @@ def main():
                         elif p in ("gemma", "whisper"):
                             voice_engine = p
                             options_given = True
+                        elif p in ("mute", "unmute"):
+                            ui.speech_muted = p == "mute"
+                            options_given = True
                         elif p == "engine":
                             continue  # allow '/voice engine gemma' phrasing
                         else:
-                            ui.print_error(f"Unknown /voice option '{part}' — usage: /voice [seconds] [gemma|whisper]")
+                            ui.print_error(f"Unknown /voice option '{part}' — usage: /voice [seconds] [gemma|whisper] [mute|unmute]")
                     # Passing options while already listening reconfigures; bare /voice toggles
                     voice_mode = True if (options_given and was_on) else not was_on
                     ui.voice_enabled = voice_mode
                     if voice_mode:
-                        ui.print_success(f"Voice Assistant Mode is now ENABLED 🎙️🔊 ({mic_duration}s speech-wait · {voice_engine} ears)")
+                        speaker = "🔇 (muted)" if ui.speech_muted else "🔊"
+                        ui.print_success(f"Voice Assistant Mode is now ENABLED 🎙️{speaker} ({mic_duration}s speech-wait · {voice_engine} ears)")
                         from gemma_agent.voice_input import ensure_voice_model
                         if voice_engine == "whisper":
                             ensure_voice_model()

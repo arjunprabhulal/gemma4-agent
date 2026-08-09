@@ -38,3 +38,15 @@ class TestUIRendering(unittest.TestCase):
             ui.speak_text("should not spawn say")  # returns before subprocess
         finally:
             ui.voice_enabled = prev
+
+    def test_speak_text_muted_never_spawns_say(self):
+        """/voice mute: listening stays on, but no `say` process may start."""
+        from unittest.mock import patch
+        prev_v, prev_m = ui.voice_enabled, ui.speech_muted
+        ui.voice_enabled, ui.speech_muted = True, True
+        try:
+            with patch("gemma_agent.ui.subprocess.Popen") as popen:
+                ui.speak_text("silent please")
+            popen.assert_not_called()
+        finally:
+            ui.voice_enabled, ui.speech_muted = prev_v, prev_m
