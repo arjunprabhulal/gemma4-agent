@@ -531,6 +531,10 @@ class ToolRegistry:
                         {"type": "text", "text": question},
                     ],
                 }],
+                # Thinking off + capped: with thinking on, the answer lands in
+                # `reasoning` and content comes back empty once the cap hits.
+                "reasoning_effort": "none",
+                "max_tokens": 700,
             }
             resp = requests.post(f"{self.ollama_host}/v1/chat/completions", json=payload, timeout=300)
             if resp.status_code == 404:

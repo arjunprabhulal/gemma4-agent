@@ -58,6 +58,8 @@ class TestToolRegistry(unittest.TestCase):
             audio_part = payload["messages"][0]["content"][0]
             self.assertEqual(audio_part["type"], "input_audio")
             self.assertEqual(audio_part["input_audio"]["format"], "wav")
+            self.assertLessEqual(payload["max_tokens"], 1000)  # no runaway generation
+            self.assertEqual(payload["reasoning_effort"], "none")  # thinking eats the budget
             self.assertGreater(len(audio_part["input_audio"]["data"]), 100)
 
             # Missing model → actionable hint
