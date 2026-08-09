@@ -12,10 +12,14 @@
   `/voice whisper` restores the default; unknown options now warn instead
   of being silently ignored. A progress spinner shows during Gemma
   transcription, and the voice status line names the active engine
+- `/voice mute` / `/voice unmute` — keep listening by microphone while
+  silencing spoken (`say`) replies; the status line shows 🔇 (muted)
 
 ### Fixed
 - Ctrl+C during voice recording cancels the capture instead of ending the
   session; Ctrl+C during generation cancels the turn, not the session
+- Grounding triggers now match plural phrasings ("Agents skills") and
+  `SKILL.md` mentions
 
 ## [1.1.0] — 2026-08-08
 
