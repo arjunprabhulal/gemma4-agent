@@ -24,6 +24,26 @@
 
 ---
 
+## 🎬 Demos
+
+### Interactive CLI
+
+<img src="https://github.com/user-attachments/assets/5f8c43d2-cf98-4220-80ce-011837d4f4fe" alt="gemma4-agent REPL session — banner, slash commands, live streaming" width="900">
+
+### Function Calling & Web Grounding
+
+<img src="https://github.com/user-attachments/assets/5904d167-2105-4073-8618-097ad5ffe284" alt="Gemma 4 invoking tools — automatic web grounding for post-cutoff topics" width="900">
+
+### Native Vision
+
+<img src="https://github.com/user-attachments/assets/4d78404c-c75b-469b-b853-2d3999f9b1fc" alt="Image analysis — Gemma 4 reasoning over an architecture diagram from a file path in the prompt" width="900">
+
+### Voice — Whisper & Gemma-Native Ears
+
+<img src="https://github.com/user-attachments/assets/7ce0a24b-698e-4393-8e09-e0b422b922f1" alt="Hands-free voice mode — microphone capture, local transcription, grounded answer" width="900">
+
+---
+
 ## ✨ Key Features & Capabilities
 
 - 🔒 **100% Private & Local-First**: Runs fully on your hardware via local Ollama inference (`http://localhost:11434`). Zero cloud logging, zero telemetry tracking, and zero API costs.
