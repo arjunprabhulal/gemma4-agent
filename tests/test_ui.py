@@ -39,6 +39,10 @@ class TestUIRendering(unittest.TestCase):
         finally:
             ui.voice_enabled = prev
 
+    def test_spoken_replies_muted_by_default(self):
+        """TTS is opt-in: a fresh session never speaks until /voice unmute."""
+        self.assertTrue(ui.speech_muted)
+
     def test_speak_text_muted_never_spawns_say(self):
         """/voice mute: listening stays on, but no `say` process may start."""
         from unittest.mock import patch
