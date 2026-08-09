@@ -61,9 +61,9 @@ def ensure_voice_model() -> bool:
 
 def _transcribe_gemma(wav_path: str, ollama_host: str) -> Optional[str]:
     """Transcribe via Gemma 4's native audio (12B) through Ollama's OpenAI-
-    compatible endpoint — the 'every network is Gemma' option. Measured ~6s
-    per utterance vs ~0.8s for Whisper on an M4 Pro; chosen explicitly via
-    `/voice gemma`, never by default."""
+    compatible endpoint — the 'every network is Gemma' option. With thinking
+    disabled and generation capped, measured ~0.8s per utterance warm (M4 Pro),
+    on par with Whisper; chosen explicitly via `/voice gemma`, never by default."""
     import base64
     import json
     import urllib.request
@@ -79,6 +79,12 @@ def _transcribe_gemma(wav_path: str, ollama_host: str) -> Optional[str]:
                     {"type": "text", "text": "Transcribe exactly what was said. Output only the transcription, nothing else."},
                 ],
             }],
+            # Thinking must be OFF: with it on, the model spends the whole
+            # budget in `reasoning` and returns empty content (observed live —
+            # 3000+ tokens, minutes of spinner). With it off: ~1.4s measured.
+            "reasoning_effort": "none",
+            "max_tokens": 150,
+            "temperature": 0,
         }
         req = urllib.request.Request(
             f"{ollama_host.rstrip('/')}/v1/chat/completions",
