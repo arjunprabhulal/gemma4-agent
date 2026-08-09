@@ -29,7 +29,7 @@
 - 🔒 **100% Private & Local-First**: Runs fully on your hardware via local Ollama inference (`http://localhost:11434`). Zero cloud logging, zero telemetry tracking, and zero API costs.
 - ⚡ **Interactive Lightning REPL**: Features a terminal interface powered by `prompt_toolkit` and `rich`, complete with command history, syntax-highlighted code previews, and live slash commands.
 - 👁️ **Multimodal Vision Integration**: Include a local image file path (`.png`, `.jpg`, `.webp`) in your prompt and it is auto-detected and fed as base64 frames directly to local Gemma vision models.
-- 🎙️🔊 **2-Way Hands-Free Voice Assistant Mode**: Toggle full voice assistant mode (`/voice`) to speak instructions via microphone and hear agent answers via spoken speaker output — your voice never leaves the machine. Two selectable transcription engines: [Whisper](https://github.com/openai/whisper) via [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (default, ~0.8s/utterance; fetch the ~74MB model with `gemma4-agent --setup-voice`), or **Gemma 4's native hearing** with `/voice gemma` (the audio-capable 12B, ~6s/utterance). Pairing guide: Whisper suits the 26B chat model; `/voice gemma` shines when the 12B is also your chat model (`--model gemma4:12b`) — one resident model, every network is Gemma.
+- 🎙️🔊 **2-Way Hands-Free Voice Assistant Mode**: Toggle full voice assistant mode (`/voice`) to speak instructions via microphone and hear agent answers via spoken speaker output — your voice never leaves the machine. Two selectable transcription engines: [Whisper](https://github.com/openai/whisper) via [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (default, ~0.8s/utterance; fetch the ~74MB model with `gemma4-agent --setup-voice`), or **Gemma 4's native hearing** with `/voice gemma` (the audio-capable 12B, ~0.8s/utterance warm — on par with Whisper). Pairing guide: Whisper needs only a 74MB model and works with any chat model; `/voice gemma` shines when `gemma4:12b` is pulled and resident — one model family doing the hearing and the thinking, every network is Gemma.
 - 🛠️ **11 Native Built-in Agent Tools**:
   - `bash_run`: Local shell command execution.
   - `read_file` & `write_file`: File inspection and creation.
@@ -147,7 +147,7 @@ Inside the `gemma4-agent` REPL session, use slash commands to manage assistant m
 | Command | Action |
 | :--- | :--- |
 | `/help` | Display interactive CLI help menu and command list |
-| `/voice [seconds] [gemma\|whisper] [mute\|unmute]` | Toggle 2-Way Voice Mode — optional wait window, transcription engine (Whisper default ~0.8s, or Gemma 4's native hearing via the 12B ~6s), and `mute` to keep listening without spoken replies |
+| `/voice [seconds] [gemma\|whisper] [mute\|unmute]` | Toggle 2-Way Voice Mode — optional wait window, transcription engine (Whisper default, or Gemma 4's native hearing via the 12B — both ~0.8s/utterance warm), and `mute` to keep listening without spoken replies |
 | `/stop` | Disable Voice Mode and return to keyboard typing (alias: `/pause`) |
 | `/tools` | List all active agent tools |
 | `/skills` | Display cached Agent Skills (`/skills clear` resets the cache) |
