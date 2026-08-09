@@ -94,6 +94,9 @@ class TestVoiceInput(unittest.TestCase):
             payload = j.loads(req.data)
             self.assertEqual(payload["model"], "gemma4:12b")
             self.assertEqual(payload["messages"][0]["content"][0]["type"], "input_audio")
+            self.assertLessEqual(payload["max_tokens"], 200)  # no runaway generation
+            self.assertEqual(payload["temperature"], 0)
+            self.assertEqual(payload["reasoning_effort"], "none")  # thinking eats the budget
         finally:
             os.remove(path)
 

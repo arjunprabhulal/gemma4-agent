@@ -8,10 +8,10 @@
   OpenAI-compatible endpoint on an audio-capable variant (`gemma4:12b`).
   Live voice input continues to use on-device Whisper by default.
 - Selectable voice transcription engine: `/voice gemma` uses Gemma 4's
-  native hearing for live speech (measured ~6s/utterance vs ~0.8s Whisper);
-  `/voice whisper` restores the default; unknown options now warn instead
-  of being silently ignored. A progress spinner shows during Gemma
-  transcription, and the voice status line names the active engine
+  native hearing for live speech (measured ~0.8s/utterance warm, on par
+  with Whisper); `/voice whisper` restores the default; unknown options now
+  warn instead of being silently ignored. A progress spinner shows during
+  Gemma transcription, and the voice status line names the active engine
 - `/voice mute` / `/voice unmute` — keep listening by microphone while
   silencing spoken (`say`) replies; the status line shows 🔇 (muted)
 
@@ -20,6 +20,11 @@
   session; Ctrl+C during generation cancels the turn, not the session
 - Grounding triggers now match plural phrasings ("Agents skills") and
   `SKILL.md` mentions
+- Gemma-native audio requests disable thinking (`reasoning_effort: none`)
+  and cap generation — with thinking on, the model spent its entire budget
+  in the `reasoning` field and returned empty content, leaving the
+  transcription spinner running for minutes (observed: 3000+ tokens).
+  Gemma transcription drops from ~6s to ~0.8s/utterance as a result
 
 ## [1.1.0] — 2026-08-08
 
