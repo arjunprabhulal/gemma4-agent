@@ -27,7 +27,7 @@ custom_theme = Theme({
 
 console = Console(theme=custom_theme)
 voice_enabled = False
-speech_muted = False  # /voice mute — listen but never speak
+speech_muted = True  # spoken replies are opt-in: /voice unmute enables `say`
 
 
 _speech_proc: Optional[subprocess.Popen] = None
@@ -254,7 +254,7 @@ def print_help():
     table.add_row("/skills", "List cached Agent Skills; '/skills clear' resets the cache")
     table.add_row("/mcp", "Register/list/remove MCP server configs (experimental)")
     table.add_row("/history", "Display conversation transcript")
-    table.add_row(escape("/voice [seconds] [gemma|whisper] [mute|unmute]"), "Toggle 2-Way Voice Mode; optional wait window, transcription engine, and speaker mute (aliases: /mic, /talk)")
+    table.add_row(escape("/voice [seconds] [gemma|whisper] [mute|unmute]"), "Toggle Voice Mode — replies are muted by default; 'unmute' speaks them aloud (aliases: /mic, /talk)")
     table.add_row("/stop", "Disable Voice Assistant mode and return to typing (alias: /pause)")
     table.add_row(escape("/think [on|off]"), "Toggle step-by-step reasoning mode (off = faster direct answers)")
     table.add_row(escape("/ground [on|off]"), "Toggle automatic web-grounding for post-cutoff topics")
