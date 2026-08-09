@@ -56,7 +56,7 @@ def main():
     parser.add_argument(
         "-v", "--voice",
         action="store_true",
-        help="Enable 2-Way Voice Mode (Microphone Input + Spoken Speaker Output)."
+        help="Enable Voice Mode at launch (microphone input; spoken replies are muted by default — /voice unmute)."
     )
     parser.add_argument(
         "--mic-duration",
@@ -121,7 +121,7 @@ def main():
     ui.print_banner(backend_name="100% LOCAL GEMMA (OLLAMA)", model_name=model_name)
 
     if voice_mode:
-        ui.print_success("🎙️🔊 2-Way Voice Assistant Mode is ENABLED (Mic Input + Spoken Speaker Output).")
+        ui.print_success("🎙️ Voice Assistant Mode is ENABLED (mic input · replies muted — /voice unmute to speak).")
         from gemma_agent.voice_input import ensure_voice_model
         ensure_voice_model()
 
@@ -191,8 +191,8 @@ def main():
                     voice_mode = True if (options_given and was_on) else not was_on
                     ui.voice_enabled = voice_mode
                     if voice_mode:
-                        speaker = "🔇 (muted)" if ui.speech_muted else "🔊"
-                        ui.print_success(f"Voice Assistant Mode is now ENABLED 🎙️{speaker} ({mic_duration}s speech-wait · {voice_engine} ears)")
+                        speaker = "🔇 (replies muted · /voice unmute to speak)" if ui.speech_muted else "🔊 (spoken replies)"
+                        ui.print_success(f"Voice Assistant Mode is now ENABLED 🎙️{speaker} · {mic_duration}s speech-wait · {voice_engine} ears")
                         from gemma_agent.voice_input import ensure_voice_model
                         if voice_engine == "whisper":
                             ensure_voice_model()

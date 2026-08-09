@@ -12,8 +12,9 @@
   with Whisper); `/voice whisper` restores the default; unknown options now
   warn instead of being silently ignored. A progress spinner shows during
   Gemma transcription, and the voice status line names the active engine
-- `/voice mute` / `/voice unmute` — keep listening by microphone while
-  silencing spoken (`say`) replies; the status line shows 🔇 (muted)
+- Spoken (`say`) replies are muted by default — voice mode listens and
+  prints; `/voice unmute` enables speech, `/voice mute` re-silences, and
+  the status line shows 🔇/🔊
 
 ### Fixed
 - Ctrl+C during voice recording cancels the capture instead of ending the
